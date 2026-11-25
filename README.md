@@ -11,3 +11,7 @@ Application web mobile de suivi d'une prise de masse (65 → 72 kg en 18 semaine
 npm install
 npm run build   # génère dist/
 ```
+
+## Publication
+
+Réglages du dépôt → Pages → Source : branche `main`, dossier `/docs`. L'adresse obtenue ouvre l'appli ; sur iPhone, Safari → Partager → Sur l'écran d'accueil.
