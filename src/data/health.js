@@ -1,4 +1,4 @@
-// ───────────── Matériel & compléments à acheter avant le 25/11/2026 ─────────────
+// ───────────── Matériel & compléments à acheter avant le 30/11/2026 ─────────────
 export const EQUIPMENT = [
   { id: 'kitchen', group: 'Mesure', name: 'Balance de cuisine (précision 1 g)', why: 'Pour peser les portions les 2 premières semaines. Ensuite tu les connais à l’œil.', qty: '1' },
   { id: 'scale', group: 'Mesure', name: 'Pèse-personne (précision 0,1 kg)', why: 'Pesée à jeun, même heure, même balance. Le chiffre seul compte peu, la moyenne de la semaine compte.', qty: '1' },
@@ -55,5 +55,5 @@ export const BLOOD_NOTES = [
   'Un bilan hormonal n’est pas toujours prescrit ni remboursé sans motif médical : demande à ton médecin traitant, c’est lui qui prescrit et qui interprète.',
   'La créatine peut faire monter légèrement la créatinine sans atteinte des reins : signale-la au médecin et au laboratoire.',
   'Compare chaque résultat aux valeurs de référence imprimées sur TON compte rendu (elles changent selon le laboratoire et la méthode). L’appli ne juge pas, elle garde l’historique.',
-  'Contrôle à la semaine 12, soit entre le 10 et le 16 février 2027, avec les mêmes conditions : même labo, même heure, à jeun.',
+  'Contrôle à la semaine 12, soit entre le 15 et le 21 février 2027, avec les mêmes conditions : même labo, même heure, à jeun.',
 ];

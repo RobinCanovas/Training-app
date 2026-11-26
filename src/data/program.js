@@ -1,6 +1,6 @@
 // ───────────── Calendrier du programme ─────────────
-export const START_DATE = '2026-11-25';   // mercredi — semaine 1
-export const TARGET_DATE = '2027-04-01';  // jour J
+export const START_DATE = '2026-11-30';   // lundi — semaine 1
+export const TARGET_DATE = '2027-04-04';  // dimanche de la semaine 18
 export const WEEKS = 18;
 
 export const PHASES = [
@@ -26,15 +26,15 @@ export function weekInfo(n) {
   return { n: w, deload: false, phaseIdx, rpe: p.rpe, name: p.name, goal: p.goal };
 }
 
-// Semaine de programme : mercredi → mardi. dow = Date.getDay()
+// Semaine de programme : lundi → dimanche. dow = Date.getDay()
 export const WEEK_PLAN = [
+  { dow: 1, type: 'gym', id: 'haut', where: 'après l’IUT' },
+  { dow: 2, type: 'run', id: 'A', where: 'après l’IUT' },
   { dow: 3, type: 'gym', id: 'bas', where: 'après le travail' },
   { dow: 4, type: 'rest', label: 'Repos actif', hint: 'Marche, étirements, 3 repas + shake. Rien d’autre.' },
   { dow: 5, type: 'run', id: 'B', where: 'après le travail' },
   { dow: 6, type: 'gym', id: 'full', where: 'après la BU' },
   { dow: 0, type: 'rest', label: 'Repos + pesée + bilan', hint: 'Pesée à jeun, bilan de la semaine, courses et prépa des repas.' },
-  { dow: 1, type: 'gym', id: 'haut', where: 'après l’IUT' },
-  { dow: 2, type: 'run', id: 'A', where: 'après l’IUT' },
 ];
 export const planForDow = (dow) => WEEK_PLAN.find((d) => d.dow === dow);
 

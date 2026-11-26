@@ -19,7 +19,7 @@ export const fmtShort = (s) => { const d = parse(s); return `${DOW_SHORT[d.getDa
 export const fmtLong = (s) => { const d = parse(s); return `${DOW_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]}`; };
 export const monthKey = (s) => s.slice(0, 7).replace('-', '_');
 
-/** Semaine de programme (mercredi → mardi), 1-based. ≤ 0 avant le départ, > 18 après la fin. */
+/** Semaine de programme (lundi → dimanche), 1-based. ≤ 0 avant le départ, > 18 après la fin. */
 export const weekIndex = (s) => Math.floor(diffDays(s, START_DATE) / 7) + 1;
 export const clampWeek = (n) => Math.min(Math.max(n, 1), WEEKS);
 export const weekStart = (n) => addDays(START_DATE, (n - 1) * 7);
