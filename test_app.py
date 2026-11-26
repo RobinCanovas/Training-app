@@ -59,6 +59,9 @@ def step(name):
     return deco
 
 
+PAGE_OVERRIDE = {}
+
+
 def make_context(browser, when, seed_ls=None, seed_db=None, vp=(390, 844)):
     ctx = browser.new_context(viewport={'width': vp[0], 'height': vp[1]}, device_scale_factor=1, timezone_id='Europe/Paris', locale='fr-FR', has_touch=True, is_mobile=True)
     pre = ''
@@ -71,7 +74,7 @@ def make_context(browser, when, seed_ls=None, seed_db=None, vp=(390, 844)):
     def handler(route):
         url = route.request.url
         if url == 'https://app.test/':
-            route.fulfill(status=200, content_type='text/html; charset=utf-8', body=HTML)
+            route.fulfill(status=200, content_type='text/html; charset=utf-8', body=PAGE_OVERRIDE.get('html', HTML))
         elif url in CDN:
             route.fulfill(status=200, content_type='application/javascript', body=CDN[url].read_text(encoding='utf-8'))
         elif 'fonts.googleapis.com' in url:
@@ -562,6 +565,28 @@ with sync_playwright() as pw:
             page6.get_by_role('button', name='Jour précédent').click()
         ok('retour limité à 7 jours', page6.get_by_role('button', name='Jour précédent').is_disabled())
     ctx6.close()
+
+    # ───────────── Parcours 7 : iPhone en mode application (encoche simulée à 59 px) ─────────────
+    PAGE_OVERRIDE['html'] = HTML.replace('env(safe-area-inset-top, 0px)', '59px').replace('env(safe-area-inset-bottom, 0px)', '34px')
+    ctx7, page7 = make_context(browser, datetime.datetime(2026, 12, 2, 15, 30, 0))
+    page7.goto('https://app.test/')
+    page7.wait_for_selector('.app-header')
+
+    @step('iPhone : l’en-tête ne masque pas la navigation de jour')
+    def _():
+        def covered(sel_name):
+            return page7.evaluate("""(n) => { const b=[...document.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')===n); if(!b) return 'absent'; const r=b.getBoundingClientRect(); const e=document.elementFromPoint(r.x+r.width/2, r.y+r.height/2); return (e===b||b.contains(e)) ? 'ok' : 'masqué par '+(e&&e.className); }""", sel_name)
+        ok('« Jour précédent » atteignable', covered('Jour précédent') == 'ok', covered('Jour précédent'))
+        page7.mouse.wheel(0, 600)
+        page7.wait_for_timeout(200)
+        ok('en-tête collé en haut après défilement', page7.evaluate("document.querySelector('.app-header').getBoundingClientRect().top") == 0)
+        page7.mouse.wheel(0, -2000)
+        page7.wait_for_timeout(200)
+        page7.get_by_role('button', name='Jour précédent').click()
+        ok('clic sur Jour précédent', page7.get_by_text('Mardi 1 décembre').first.is_visible())
+        shot(page7, '40_iphone_notch.png')
+    ctx7.close()
+    PAGE_OVERRIDE.clear()
 
     ctx4, page4 = make_context(browser, datetime.datetime(2027, 1, 8, 9, 0, 0), seed_ls=seed, vp=(360, 740))
     page4.goto('https://app.test/')
