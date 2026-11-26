@@ -764,6 +764,32 @@ function RescueModal({ open, onClose, date }) {
 }
 
 // ───────────── Forme du jour ─────────────
+// Le soir : de quoi préparer demain (le matin, tu n'as ni le temps ni l'énergie de réfléchir)
+function TomorrowCard({ state, date }) {
+  const now = useNow(60000);
+  if (date !== todayISO() || new Date(now).getHours() < 19) return null;
+  const tm = addDays(date, 1);
+  const sch = scheduleOn(state, tm);
+  const T = targetsFor(state, tm);
+  const d = dow(tm);
+  const place = d === 1 || d === 2 ? 'IUT' : d >= 3 && d <= 5 ? 'entreprise' : null;
+  const plan = !sch ? 'À définir' : sch.type === 'gym' ? `Muscu · ${SESSIONS[sch.id]?.name || ''}` : sch.type === 'run' ? `Course ${sch.id}` : sch.label;
+  const meals = DAY_TYPES[dayTypeFor(state, tm)].meals;
+  return (
+    <Card title={`Demain · ${fmtLong(tm)}`} icon="CalendarClock">
+      <div className="grid gap-1.5 text-[14px] leading-snug">
+        <div className="flex justify-between gap-3"><span className="text-muted">Au programme</span><b className="text-right">{plan}{sch?.where ? ` (${sch.where})` : ''}</b></div>
+        <div className="flex justify-between gap-3"><span className="text-muted">Petit-déjeuner</span><b>{mealTime(state, tm, 'bkf')}</b></div>
+        <div className="flex justify-between gap-3"><span className="text-muted">Cible</span><b className="num">{fmtK(T.kcal)} kcal · {meals.length} repas</b></div>
+      </div>
+      <div className="mt-3 rounded-xl bg-raised border border-line px-3 py-2 text-[13px] leading-snug text-muted">
+        {place ? <><b className="text-text">Journée {place === 'IUT' ? 'à l’IUT' : 'en entreprise'} :</b> mets le déjeuner et le shake dans ton sac ce soir. Un repas oublié coûte plus cher qu’une minute de préparation.</> : <><b className="text-text">Journée à la maison :</b> pas d’excuse pour sauter un repas, et le frigo est à côté.</>}
+        {' '}Règle ton heure de réveil demain matin pour que l’heure du petit-déjeuner s’ajuste.
+      </div>
+    </Card>
+  );
+}
+
 function GoalsCard({ state, date }) {
   const today = todayISO();
   const G = weekGoals(state, date, today);
@@ -914,6 +940,7 @@ export default function Today({ go }) {
       <EveningCard state={state} date={date} onEdit={setEditId} onRescue={() => setRescue(true)} onQuick={() => setQuick(true)} />
       <div id="flow-steps" style={{ scrollMarginTop: 72 }}><PacerioCard state={state} date={date} /></div>
       {date === today && dow(date) === 0 && <SundayCard go={go} state={state} />}
+      <TomorrowCard state={state} date={date} />
       <GoalsCard state={state} date={date} />
       <CheckinCard state={state} date={date} />
       <SuppManager state={state} open={supps} onClose={() => setSupps(false)} />
