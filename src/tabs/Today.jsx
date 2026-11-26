@@ -7,7 +7,7 @@ import { weekInfo, SESSIONS, RUN_PLAN, START_DATE, WEEKS } from '../data/program
 import { todayISO, weekIndex, clampWeek, daysToTarget, fmtShort, fmtLong, dow, toMin, fmtNum, diffDays, addDays } from '../lib/dates.js';
 import { measureStatus } from '../lib/body.js';
 import { weekGoals, streak, nextMilestone } from '../lib/goals.js';
-import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
+import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, weightTrend, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
 
 const whenLabel = (date) => (date === todayISO() ? 'aujourd’hui' : `le ${fmtShort(date)}`);
 
@@ -67,6 +67,7 @@ function WeightHero({ state, date }) {
   const left = daysToTarget(date);
   const delta = kg - S.startWeight;
   const todayKg = state.weights[date];
+  const trend = weightTrend(state, date);
   const [draft, setDraft] = useState(todayKg ?? '');
   useEffect(() => { setDraft(todayKg ?? ''); }, [todayKg, date]);
   const save = () => {
@@ -107,6 +108,7 @@ function WeightHero({ state, date }) {
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-muted">{week < 1 ? 'Départ le lundi 30 novembre' : `Semaine ${clampWeek(week)}/${WEEKS}`}</div>
           <div className="text-[15px] font-semibold truncate">{wInfo.name}</div>
+          {trend && <div className="text-[12px] text-muted num mt-0.5" aria-label="Tendance sur 7 jours">Tendance 7 j : <b className="text-text">{fmtNum(trend.avg)} kg</b>{trend.perWeek != null && <span className={trend.perWeek < 0 ? 'text-warn' : trend.perWeek > 0.5 ? 'text-warn' : 'text-good'}> ({trend.perWeek >= 0 ? '+' : '−'}{fmtNum(Math.abs(trend.perWeek), 2)}/sem.)</span>}</div>}
         </div>
         <div className="w-[104px]"><NumInput value={draft} onChange={setDraft} placeholder={fmtNum(kg)} suffix="kg" ariaLabel="Poids du jour à jeun" /></div>
         <Btn variant="primary" onClick={save} aria-label="Enregistrer la pesée">{todayKg != null ? 'Modifier' : 'Peser'}</Btn>
@@ -762,6 +764,32 @@ function RescueModal({ open, onClose, date }) {
 }
 
 // ───────────── Forme du jour ─────────────
+// Le soir : de quoi préparer demain (le matin, tu n'as ni le temps ni l'énergie de réfléchir)
+function TomorrowCard({ state, date }) {
+  const now = useNow(60000);
+  if (date !== todayISO() || new Date(now).getHours() < 19) return null;
+  const tm = addDays(date, 1);
+  const sch = scheduleOn(state, tm);
+  const T = targetsFor(state, tm);
+  const d = dow(tm);
+  const place = d === 1 || d === 2 ? 'IUT' : d >= 3 && d <= 5 ? 'entreprise' : null;
+  const plan = !sch ? 'À définir' : sch.type === 'gym' ? `Muscu · ${SESSIONS[sch.id]?.name || ''}` : sch.type === 'run' ? `Course ${sch.id}` : sch.label;
+  const meals = DAY_TYPES[dayTypeFor(state, tm)].meals;
+  return (
+    <Card title={`Demain · ${fmtLong(tm)}`} icon="CalendarClock">
+      <div className="grid gap-1.5 text-[14px] leading-snug">
+        <div className="flex justify-between gap-3"><span className="text-muted">Au programme</span><b className="text-right">{plan}{sch?.where ? ` (${sch.where})` : ''}</b></div>
+        <div className="flex justify-between gap-3"><span className="text-muted">Petit-déjeuner</span><b>{mealTime(state, tm, 'bkf')}</b></div>
+        <div className="flex justify-between gap-3"><span className="text-muted">Cible</span><b className="num">{fmtK(T.kcal)} kcal · {meals.length} repas</b></div>
+      </div>
+      <div className="mt-3 rounded-xl bg-raised border border-line px-3 py-2 text-[13px] leading-snug text-muted">
+        {place ? <><b className="text-text">Journée {place === 'IUT' ? 'à l’IUT' : 'en entreprise'} :</b> mets le déjeuner et le shake dans ton sac ce soir. Un repas oublié coûte plus cher qu’une minute de préparation.</> : <><b className="text-text">Journée à la maison :</b> pas d’excuse pour sauter un repas, et le frigo est à côté.</>}
+        {' '}Règle ton heure de réveil demain matin pour que l’heure du petit-déjeuner s’ajuste.
+      </div>
+    </Card>
+  );
+}
+
 function GoalsCard({ state, date }) {
   const today = todayISO();
   const G = weekGoals(state, date, today);
@@ -912,6 +940,7 @@ export default function Today({ go }) {
       <EveningCard state={state} date={date} onEdit={setEditId} onRescue={() => setRescue(true)} onQuick={() => setQuick(true)} />
       <div id="flow-steps" style={{ scrollMarginTop: 72 }}><PacerioCard state={state} date={date} /></div>
       {date === today && dow(date) === 0 && <SundayCard go={go} state={state} />}
+      <TomorrowCard state={state} date={date} />
       <GoalsCard state={state} date={date} />
       <CheckinCard state={state} date={date} />
       <SuppManager state={state} open={supps} onClose={() => setSupps(false)} />

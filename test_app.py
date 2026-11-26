@@ -426,6 +426,7 @@ with sync_playwright() as pw:
     @step('Historique : jauge, coach, courbes')
     def _():
         shot(page3, '20_today_seeded.png')
+        ok('tendance 7 jours affichée', page3.get_by_label('Tendance sur 7 jours').is_visible() and 'kg' in page3.get_by_label('Tendance sur 7 jours').inner_text())
         tab(page3, 'Stats')
         page3.wait_for_timeout(500)
         ok('3 graphiques', page3.locator('svg.recharts-surface').count() >= 3, str(page3.locator('svg.recharts-surface').count()))
@@ -611,8 +612,23 @@ with sync_playwright() as pw:
         ok('barre de progression du programme', page7.get_by_role('progressbar', name='Avancement du programme').count() == 1)
         page7.get_by_text('Objectifs · semaine 1').scroll_into_view_if_needed()
         shot(page7, '41_goals.png')
+        ok('pas de carte Demain en journée', page7.get_by_text(re.compile('Demain ·', re.I)).count() == 0)
     ctx7.close()
     PAGE_OVERRIDE.clear()
+
+    # ───────────── Parcours 8 : mercredi soir, carte « Demain » ─────────────
+    ctx8, page8 = make_context(browser, datetime.datetime(2026, 12, 2, 20, 0, 0))
+    page8.goto('https://app.test/')
+    page8.wait_for_selector('.app-header')
+
+    @step('Le soir : carte Demain')
+    def _():
+        ok('titre avec la date de demain', page8.get_by_text(re.compile(r'Demain · Jeudi 3 décembre', re.I)).first.is_visible())
+        ok('programme de demain : repos actif', page8.get_by_text('Repos actif').first.is_visible())
+        ok('conseil entreprise', page8.get_by_text('Journée en entreprise').is_visible())
+        page8.get_by_text(re.compile('Demain ·', re.I)).first.scroll_into_view_if_needed()
+        shot(page8, '43_tomorrow.png')
+    ctx8.close()
 
     ctx4, page4 = make_context(browser, datetime.datetime(2027, 1, 8, 9, 0, 0), seed_ls=seed, vp=(360, 740))
     page4.goto('https://app.test/')
