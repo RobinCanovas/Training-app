@@ -35,7 +35,7 @@ function SettingsModal({ open, onClose }) {
       <div className="grid grid-cols-2 gap-2.5">
         <Field label="Poids de départ"><NumInput value={S.startWeight} onChange={set('startWeight')} suffix="kg" ariaLabel="Poids de départ" /></Field>
         <Field label="Poids objectif"><NumInput value={S.targetWeight} onChange={set('targetWeight')} suffix="kg" ariaLabel="Poids objectif" /></Field>
-        <Field label="Calories de base"><NumInput value={S.baseKcal} onChange={set('baseKcal')} suffix="kcal" ariaLabel="Calories de base" /></Field>
+        <Field label="Calories de base (dose pleine)"><NumInput value={S.baseKcal} onChange={set('baseKcal')} suffix="kcal" ariaLabel="Calories de base" /></Field>
         <Field label="Bonus jour de course"><NumInput value={S.runBonus} onChange={set('runBonus')} suffix="kcal" ariaLabel="Bonus calories jour de course" /></Field>
         <Field label="Protéines (min)"><NumInput value={S.protein} onChange={set('protein')} suffix="g" ariaLabel="Protéines minimum" /></Field>
         <Field label="Glucides (min)"><NumInput value={S.carbMin} onChange={set('carbMin')} suffix="g" ariaLabel="Glucides minimum" /></Field>
@@ -182,7 +182,7 @@ export default function App() {
               <h1 className="text-[19px] font-bold leading-tight truncate">{tab.title}</h1>
             </div>
             <div className="text-[12.5px] text-muted leading-tight mt-0.5 truncate">
-              <span>{fmtShort(today)}</span> · {n < 1 ? 'départ le 25 nov.' : `S${clampWeek(n)}/${WEEKS} · ${wi.name}`}
+              <span>{fmtShort(today)}</span> · {n < 1 ? 'départ le 30 nov.' : `S${clampWeek(n)}/${WEEKS} · ${wi.name}`}
             </div>
           </div>
           <button type="button" aria-label="Mes données : sauvegarde et synchronisation" onClick={() => setData(true)} className="w-11 h-11 rounded-xl bg-raised border border-line inline-flex items-center justify-center text-muted"><Icon name="Database" size={19} /></button>

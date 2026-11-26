@@ -24,7 +24,7 @@ function WeightChart({ state }) {
   const hasData = rows.some((r) => r.real != null);
   const lbl = (x) => (x === 0 ? 'Départ' : `Semaine ${x}`);
   return (
-    <ChartCard title="Poids moyen par semaine" sub={hasData ? 'Moyenne des pesées à jeun de chaque semaine (mercredi → mardi), comparée à la trajectoire vers l’objectif.' : 'Pèse-toi à jeun chaque matin : la courbe orange apparaît dès la première semaine. La trajectoire bleue est ton objectif.'}
+    <ChartCard title="Poids moyen par semaine" sub={hasData ? 'Moyenne des pesées à jeun de chaque semaine (lundi → dimanche), comparée à la trajectoire vers l’objectif.' : 'Pèse-toi à jeun chaque matin : la courbe orange apparaît dès la première semaine. La trajectoire bleue est ton objectif.'}
       legend={[{ name: 'Poids moyen (kg)', color: C.orange }, { name: 'Trajectoire vers l’objectif', color: C.blue }]}
       table={<DataTable head={['Semaine', 'Moyenne', 'Objectif', 'Pesées']} rows={rows.map((r) => [r.x === 0 ? 'Départ' : `S${r.x}`, r.real != null ? fmtNum(r.real, 1) : '–', fmtNum(r.plan, 1), r.count || '–'])} />}>
       <div style={{ height: 232 }}>
@@ -184,7 +184,7 @@ function WeekReview({ state }) {
         <ReviewRow label="Course" value={`${fmtNum(W.km, 1)} / ${fmtNum(kmPlan, 1)} km`} meter={[W.km, kmPlan]}
           sub={W.runN ? `${W.runN} sortie${W.runN > 1 ? 's' : ''}${W.pace ? ` · allure moyenne ${mmss(W.pace)} /km` : ''}${W.up ? ` · D+ ${Math.round(W.up)} m` : ''}` : 'Aucune sortie enregistrée.'} />
         <ReviewRow label="Hydratation" value={`${W.water}/${W.elapsed} j`} meter={[W.water, W.elapsed]} sub={`Jours à ${fmtNum(S.water / 1000, 1)} L ou plus`} />
-        <ReviewRow label="Créatine" value={`${W.creat}/${W.elapsed} j`} meter={[W.creat, W.elapsed]} />
+        {state.supps.some((x) => x.id === 'creatine') && <ReviewRow label="Créatine" value={`${W.creat}/${W.elapsed} j`} meter={[W.creat, W.elapsed]} />}
         {(W.sleep != null || W.energy != null) && <ReviewRow label="Forme" value={`${W.sleep != null ? `${fmtNum(W.sleep, 1)} h` : '–'} · ${W.energy != null ? `${fmtNum(W.energy, 1)}/5` : '–'}`} sub="Sommeil moyen · énergie moyenne" />}
       </div>
     </Card>

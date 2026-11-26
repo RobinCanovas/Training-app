@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { Card, Btn, Chip, Icon, Meter, Modal, Field, NumInput, toast, useNow, cx, fmtK } from '../ui.jsx';
+import { Card, Btn, Chip, Icon, Meter, Modal, Field, NumInput, toast, useNow, useArm, cx, fmtK } from '../ui.jsx';
 import { A, useAppState } from '../store.js';
-import { MEALS, DAY_TYPES, QUICK, RESCUE } from '../data/nutrition.js';
+import { MEALS, DAY_TYPES, QUICK, RESCUE, rampFactor } from '../data/nutrition.js';
 import { FOODS, fmtQty } from '../data/foods.js';
 import { weekInfo, SESSIONS, RUN_PLAN, START_DATE, WEEKS } from '../data/program.js';
 import { todayISO, weekIndex, clampWeek, daysToTarget, fmtShort, fmtLong, dow, toMin, fmtNum, diffDays, addDays } from '../lib/dates.js';
 import { measureStatus } from '../lib/body.js';
-import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, mealMacros, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
+import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
 
 const whenLabel = (date) => (date === todayISO() ? 'aujourd’hui' : `le ${fmtShort(date)}`);
 
@@ -87,7 +87,7 @@ function WeightHero({ state, date }) {
       </div>
       <div className="hair px-4 py-3 flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] text-muted">{week < 1 ? 'Départ le 25 novembre' : `Semaine ${clampWeek(week)}/${WEEKS}`}</div>
+          <div className="text-[13px] text-muted">{week < 1 ? 'Départ le lundi 30 novembre' : `Semaine ${clampWeek(week)}/${WEEKS}`}</div>
           <div className="text-[15px] font-semibold truncate">{wInfo.name}</div>
         </div>
         <div className="w-[104px]"><NumInput value={draft} onChange={setDraft} placeholder={fmtNum(kg)} suffix="kg" ariaLabel="Poids du jour à jeun" /></div>
@@ -188,7 +188,7 @@ function PacerioCard({ state, date }) {
   const T = targetsFor(state, date);
   const ref = referenceActive(state, date);
   const sl = T.active?.slope;
-  const base = fmtK(state.settings.baseKcal);
+  const base = fmtK(T.base);
 
   // estimation en direct à partir des pas tapés (avant validation)
   const sNum = num(steps), kNum = num(kcal);
@@ -232,7 +232,7 @@ function PacerioCard({ state, date }) {
   };
 
   return (
-    <Card title="Sync Pacerio" icon="Footprints" right={p ? <Chip tone={p.kcal > 0 ? 'good' : 'blue'} icon="Check">{p.kcal > 0 ? (p.src || 'ok') : 'estimé'}</Chip> : <Chip>à saisir</Chip>}>
+    <Card title="Pas du soir (Pacerio)" icon="Footprints" right={p ? <Chip tone={p.kcal > 0 ? 'good' : 'blue'} icon="Check">{p.kcal > 0 ? (p.src || 'ok') : 'estimé'}</Chip> : <Chip>à saisir</Chip>}>
       <div className="text-[13.5px] text-muted leading-snug mb-3">Entre seulement tes pas : l’appli calcule toute seule tes calories actives et adapte ta cible du jour. Si tu as les vraies calories actives (Pacerio, montre), ajoute-les : elles remplacent l’estimation et la rendent plus juste les jours suivants.</div>
       <div className="grid grid-cols-2 gap-2.5">
         <Field label="Pas"><NumInput value={steps} onChange={setSteps} placeholder="8 450" ariaLabel="Nombre de pas" /></Field>
@@ -314,6 +314,11 @@ function RemainingCard({ state, date, onQuick }) {
         <Remaining label="Glucides" unit="g" got={C.c} target={T.c} minimum />
         <Remaining label="Lipides" unit="g" got={C.f} target={T.f} />
       </div>
+      {T.ramp > 0 && (
+        <div className="mt-3 rounded-xl bg-raised border border-line px-3 py-2 text-[13px] leading-snug text-muted">
+          <b className="text-text">Montée progressive :</b> shake à {Math.round(rampFactor(weekIndex(date)) * 100)} % cette semaine, la cible monte toute seule jusqu’à la dose pleine. Aujourd’hui {fmtK(T.kcal)} kcal au lieu de {fmtK(T.kcal + T.ramp)}.
+        </div>
+      )}
       {extras.length > 0 && (
         <div className="mt-3 hair pt-2.5">
           <div className="lbl mb-1.5">Ajouts du jour</div>
@@ -379,7 +384,7 @@ function QuickAddModal({ open, onClose, date }) {
 
 // ───────────── Calories réelles d'un repas du plan ─────────────
 function MealEditModal({ state, date, id, onClose }) {
-  const m = MEALS[id];
+  const m = mealAt(state, date, id);
   const cur = state.days[date]?.mealEdits?.[id];
   const base = m.macros;
   const start = cur || base;
@@ -453,77 +458,245 @@ function Hydration({ state, date }) {
   );
 }
 
-function Checklist({ state, date, onRescue, onQuick, onEdit }) {
-  const now = useNow(30000);
-  const type = dayTypeFor(state, date);
-  const times = state.settings.times[type];
-  const [open, setOpen] = useState(null);
+const hhmmNow = () => { const x = new Date(); return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+
+function MealRow({ state, date, id, onEdit, minutes }) {
+  const [open, setOpen] = useState(false);
+  const m = mealAt(state, date, id);
+  const eff = mealMacros(state, date, id);
   const d = state.days[date] || {};
-  const isToday = date === todayISO();
-  const minutes = (() => { const x = new Date(now); return x.getHours() * 60 + x.getMinutes(); })();
-  const list = DAY_TYPES[type].meals.slice().sort((a, b) => toMin(times[a]) - toMin(times[b]));
-  const done = list.filter((id) => d.meals?.[id]).length + (d.creatine ? 1 : 0);
-  const total = list.length + 1;
+  const time = mealTime(state, date, id);
+  const edited = !!d.mealEdits?.[id];
+  const on = !!d.meals?.[id];
+  const late = date === todayISO() && !on ? minutes - toMin(time) : -1;
   return (
-    <Card title="Anti-oubli" icon="ListChecks" right={<Chip tone={done === total ? 'good' : undefined}>{done}/{total}</Chip>}>
-      <div className="grid gap-1">
-        {list.map((id) => {
-          const m = MEALS[id];
-          const eff = mealMacros(state, date, id);
-          const edited = !!d.mealEdits?.[id];
-          const on = !!d.meals?.[id];
-          const late = isToday && !on ? minutes - toMin(times[id]) : -1;
-          const lateTone = late >= 90 ? 'serious' : 'warn';
-          return (
-            <div key={id} className="rounded-xl border border-line bg-raised/60">
-              <div className="flex items-center gap-2.5 px-3 py-2.5">
-                <button type="button" className="check" data-on={on ? '1' : '0'} aria-pressed={on} aria-label={`${m.name} : ${on ? 'fait' : 'à faire'}`} onClick={() => A.toggleMeal(date, id)}>
-                  {on && <Icon name="Check" size={18} strokeWidth={3} />}
-                </button>
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => A.toggleMeal(date, id)}>
-                  <div className={cx('text-[15.5px] font-semibold leading-tight', on && 'text-muted line-through decoration-1')}>{m.name}</div>
-                  <div className="text-[12.5px] text-muted num mt-0.5 flex items-center gap-1.5 flex-wrap">
-                    <span className="inline-flex items-center gap-1"><Icon name="Clock" size={12} />{times[id]}</span>
-                    <span>·</span><span className={cx(edited && 'text-text font-semibold')}>{eff.k} kcal</span><span>·</span><span>{eff.p} g P</span>
-                    {edited && <Chip tone="blue" className="ml-0.5">modifié</Chip>}
-                    {late >= 30 && <Chip tone={lateTone} icon="TriangleAlert" className="ml-0.5">En retard {late >= 60 ? `${Math.floor(late / 60)} h ${String(late % 60).padStart(2, '0')}` : `${late} min`}</Chip>}
-                  </div>
-                </button>
-                <button type="button" aria-label={`Modifier les calories ${m.name}`} onClick={() => onEdit(id)} className={cx('w-9 h-9 rounded-lg inline-flex items-center justify-center flex-none', edited ? 'text-blue' : 'text-muted')}>
-                  <Icon name="Pencil" size={16} />
-                </button>
-                <button type="button" aria-label={`Détails ${m.name}`} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)} className="w-9 h-9 rounded-lg inline-flex items-center justify-center text-muted flex-none">
-                  <Icon name={open === id ? 'ChevronUp' : 'ChevronDown'} size={18} />
-                </button>
-              </div>
-              {open === id && (
-                <div className="px-3.5 pb-3 pt-0.5 text-[13.5px]">
-                  <div className="font-semibold mb-1">{m.title}</div>
-                  <ul className="text-muted leading-snug">{m.items.map(([fid, q]) => <li key={fid}>{fmtItem(fid, q)}</li>)}</ul>
-                  <div className="mt-1.5 text-muted leading-snug">{m.how}</div>
-                  <div className="mt-1.5 text-muted num">Plan : {m.macros.k} kcal · {m.macros.p} g P · {m.macros.c} g G · {m.macros.f} g L</div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        <div className="rounded-xl border border-line bg-raised/60 flex items-center gap-3 px-3 py-2.5">
-          <button type="button" className="check" data-on={d.creatine ? '1' : '0'} aria-pressed={!!d.creatine} aria-label="Créatine 5 grammes" onClick={() => A.toggleCreatine(date)}>
-            {d.creatine && <Icon name="Check" size={18} strokeWidth={3} />}
-          </button>
-          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => A.toggleCreatine(date)}>
-            <div className={cx('text-[15.5px] font-semibold leading-tight', d.creatine && 'text-muted line-through decoration-1')}>Créatine monohydrate 5 g</div>
-            <div className="text-[12.5px] text-muted mt-0.5">Dans un verre d’eau, avec le petit-déjeuner</div>
-          </button>
-          <Icon name="FlaskConical" size={18} className="text-muted mr-2" />
-        </div>
-        <div className="rounded-xl border border-line bg-raised/60 px-3.5 py-3"><Hydration state={state} date={date} /></div>
+    <div className="rounded-xl border border-line bg-raised/60">
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <button type="button" className="check" data-on={on ? '1' : '0'} aria-pressed={on} aria-label={`${m.name} : ${on ? 'fait' : 'à faire'}`} onClick={() => A.toggleMeal(date, id)}>
+          {on && <Icon name="Check" size={18} strokeWidth={3} />}
+        </button>
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => A.toggleMeal(date, id)}>
+          <div className={cx('text-[15.5px] font-semibold leading-tight', on && 'text-muted line-through decoration-1')}>{m.name}</div>
+          <div className="text-[13px] text-muted leading-tight mt-0.5 truncate">{m.title}</div>
+          <div className="text-[12.5px] text-muted num mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1"><Icon name="Clock" size={12} />{time}</span>
+            <span>·</span><span className={cx(edited && 'text-text font-semibold')}>{eff.k} kcal</span><span>·</span><span>{eff.p} g P</span>
+            {edited && <Chip tone="blue" className="ml-0.5">modifié</Chip>}
+            {late >= 30 && <Chip tone={late >= 90 ? 'serious' : 'warn'} icon="TriangleAlert" className="ml-0.5">En retard {late >= 60 ? `${Math.floor(late / 60)} h ${String(late % 60).padStart(2, '0')}` : `${late} min`}</Chip>}
+          </div>
+        </button>
+        <button type="button" aria-label={`Modifier les calories ${m.name}`} onClick={() => onEdit(id)} className={cx('w-9 h-9 rounded-lg inline-flex items-center justify-center flex-none', edited ? 'text-blue' : 'text-muted')}>
+          <Icon name="Pencil" size={16} />
+        </button>
+        <button type="button" aria-label={`Détails ${m.name}`} aria-expanded={open} onClick={() => setOpen(!open)} className="w-9 h-9 rounded-lg inline-flex items-center justify-center text-muted flex-none">
+          <Icon name={open ? 'ChevronUp' : 'ChevronDown'} size={18} />
+        </button>
       </div>
-      <div className="grid gap-2 mt-3">
+      {open && (
+        <div className="px-3.5 pb-3 pt-0.5 text-[13.5px]">
+          <div className="font-semibold mb-1">{m.title}</div>
+          <ul className="text-muted leading-snug">{m.items.map(([fid, q]) => <li key={fid}>{fmtItem(fid, q)}</li>)}</ul>
+          <div className="mt-1.5 text-muted leading-snug">{m.how}</div>
+          <div className="mt-1.5 text-muted num">Plan : {m.macros.k} kcal · {m.macros.p} g P · {m.macros.c} g G · {m.macros.f} g L</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SuppRows({ state, date, when }) {
+  const d = state.days[date] || {};
+  return state.supps.filter((x) => (x.when || 'morning') === when).map((x) => {
+    const on = suppOn(d, x.id);
+    return (
+      <div key={x.id} className="rounded-xl border border-line bg-raised/60 flex items-center gap-3 px-3 py-2.5">
+        <button type="button" className="check" data-on={on ? '1' : '0'} aria-pressed={on} aria-label={`${x.name} ${x.dose || ''}`.trim()} onClick={() => A.toggleSupp(date, x.id)}>
+          {on && <Icon name="Check" size={18} strokeWidth={3} />}
+        </button>
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => A.toggleSupp(date, x.id)}>
+          <div className={cx('text-[15.5px] font-semibold leading-tight', on && 'text-muted line-through decoration-1')}>{x.name}{x.dose ? ` · ${x.dose}` : ''}</div>
+          <div className="text-[12.5px] text-muted mt-0.5">{when === 'morning' ? 'Avec le petit-déjeuner' : 'Le soir'}</div>
+        </button>
+        <Icon name="FlaskConical" size={18} className="text-muted mr-2" />
+      </div>
+    );
+  });
+}
+
+const SUPP_PRESETS = [
+  { id: 'creatine', name: 'Créatine monohydrate', dose: '5 g' },
+  { id: 'omega3', name: 'Oméga-3', dose: '1 g EPA + DHA' },
+  { id: 'mg', name: 'Magnésium', dose: 'dose de l’étiquette', when: 'evening' },
+  { name: 'Vitamine D', dose: 'dose de l’étiquette' },
+  { name: 'Zinc', dose: 'dose de l’étiquette', when: 'evening' },
+  { name: 'Multivitamines', dose: '1 comprimé' },
+];
+
+function SuppManager({ state, open, onClose }) {
+  const [name, setName] = useState('');
+  const [dose, setDose] = useState('');
+  const [when, setWhen] = useState('morning');
+  const [armed, setArmed] = useArm();
+  const [target, setTarget] = useState(null);
+  const has = (id, nm) => state.supps.some((x) => (id && x.id === id) || x.name.toLowerCase() === nm.toLowerCase());
+  const add = (x) => {
+    const nm = (x.name || '').trim();
+    if (!nm) { toast('Donne un nom au complément', 'warn'); return; }
+    if (has(x.id, nm)) { toast(`${nm} est déjà dans ta liste`, 'warn'); return; }
+    A.addSupp({ ...x, name: nm, dose: (x.dose || '').trim(), when: x.when || 'morning' });
+    toast(`${nm} ajouté à ta journée`, 'good');
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Mes compléments">
+      <p className="text-[13.5px] text-muted leading-snug mb-3">Ce que tu prends chaque jour : ils apparaissent dans « Matin » ou « Soir » pour être cochés. La dose est celle de l’étiquette ; l’appli ne remplace pas l’avis d’un médecin ou d’un pharmacien. Les prix se saisissent dans Compta › Prix.</p>
+      {state.supps.length === 0 && <div className="text-[14px] text-muted mb-3">Aucun complément suivi pour l’instant.</div>}
+      <div className="grid gap-2 mb-4">
+        {state.supps.map((x) => (
+          <div key={x.id} className="rounded-xl border border-line bg-raised/60 px-3 py-2.5 flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold leading-tight truncate">{x.name}</div>
+              <div className="text-[12.5px] text-muted truncate">{x.dose || 'dose non précisée'} · {(x.when || 'morning') === 'morning' ? 'matin' : 'soir'}</div>
+            </div>
+            <Btn size="sm" icon="Trash2" aria-label={armed && target === x.id ? `Confirmer le retrait de ${x.name}` : `Retirer ${x.name}`} variant={armed && target === x.id ? 'primary' : 'ghost'}
+              onClick={() => { if (armed && target === x.id) { A.removeSupp(x.id); setArmed(false); toast(`${x.name} retiré`); } else { setTarget(x.id); setArmed(true); } }}>
+              {armed && target === x.id ? 'Confirmer' : 'Retirer'}
+            </Btn>
+          </div>
+        ))}
+      </div>
+      <div className="lbl mb-2">Ajouter</div>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {SUPP_PRESETS.filter((x) => !has(x.id, x.name)).map((x) => (
+          <button key={x.name} type="button" onClick={() => add(x)} className="chip min-h-[36px]"><Icon name="Plus" size={12} />{x.name}</button>
+        ))}
+      </div>
+      <input className="inp mb-2" placeholder="Nom (ex. Whey hors shake)" value={name} onChange={(e) => setName(e.target.value)} aria-label="Nom du complément" />
+      <input className="inp mb-2" placeholder="Dose (ex. 25 g)" value={dose} onChange={(e) => setDose(e.target.value)} aria-label="Dose du complément" />
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        {[['morning', 'Matin'], ['evening', 'Soir']].map(([k, l]) => (
+          <button key={k} type="button" aria-pressed={when === k} onClick={() => setWhen(k)}
+            className={cx('min-h-[44px] rounded-xl text-[15px] font-semibold border', when === k ? 'bg-accent text-accent-ink border-accent' : 'bg-raised border-line text-muted')}>{l}</button>
+        ))}
+      </div>
+      <Btn variant="primary" className="w-full" icon="Plus" onClick={() => { add({ name, dose, when }); setName(''); setDose(''); }}>Ajouter ce complément</Btn>
+    </Modal>
+  );
+}
+
+function WakeRow({ state, date }) {
+  const w = state.days[date]?.wake || '';
+  const isToday = date === todayISO();
+  const bk = w ? mealTime(state, date, 'bkf') : null;
+  return (
+    <div className="mb-2.5">
+      <div className="flex items-end gap-2">
+        <Field label="Heure de réveil" className="flex-1">
+          <input type="time" className="inp" value={w} onChange={(e) => A.setWake(date, e.target.value)} aria-label="Heure de réveil" />
+        </Field>
+        {isToday && <Btn icon="Sunrise" onClick={() => { A.setWake(date, hhmmNow()); toast('Réveil noté', 'good'); }}>Maintenant</Btn>}
+      </div>
+      <div className="text-[12.5px] text-muted mt-1.5 leading-snug">{w ? `Petit-déjeuner visé à ${bk}, dans la demi-heure qui suit le réveil.` : 'Note ton heure de réveil : le petit-déjeuner s’en déduit. Rien mangé au réveil ? C’est ça qui fait dérailler la journée.'}</div>
+    </div>
+  );
+}
+
+function Moment({ id, title, icon, done, total, children }) {
+  return (
+    <div id={`flow-${id}`} style={{ scrollMarginTop: 72 }}>
+      <Card title={title} icon={icon} right={<Chip tone={done === total ? 'good' : undefined}>{done}/{total}</Chip>}>
+        <div className="grid gap-1.5">{children}</div>
+      </Card>
+    </div>
+  );
+}
+
+const sortByTime = (state, date, ids) => ids.slice().sort((a, b) => toMin(mealTime(state, date, a)) - toMin(mealTime(state, date, b)));
+const countOn = (d, ids) => ids.filter((id) => d.meals?.[id]).length;
+
+function MorningCard({ state, date, onEdit, onSupps }) {
+  const now = useNow(30000);
+  const d = state.days[date] || {};
+  const x = new Date(now);
+  const minutes = x.getHours() * 60 + x.getMinutes();
+  const morning = state.supps.filter((s) => (s.when || 'morning') === 'morning');
+  const done = (d.wake ? 1 : 0) + countOn(d, ['bkf']) + morning.filter((s) => suppOn(d, s.id)).length;
+  const total = 2 + morning.length;
+  return (
+    <Moment id="morning" title="Matin" icon="Sunrise" done={done} total={total}>
+      <WakeRow state={state} date={date} />
+      <MealRow state={state} date={date} id="bkf" onEdit={onEdit} minutes={minutes} />
+      <SuppRows state={state} date={date} when="morning" />
+      <Btn size="sm" icon="FlaskConical" onClick={onSupps}>Mes compléments</Btn>
+    </Moment>
+  );
+}
+
+function MiddayCard({ state, date, onEdit }) {
+  const now = useNow(30000);
+  const d = state.days[date] || {};
+  const x = new Date(now);
+  const minutes = x.getHours() * 60 + x.getMinutes();
+  return (
+    <Moment id="midday" title="Midi" icon="Utensils" done={countOn(d, ['lunch'])} total={1}>
+      <MealRow state={state} date={date} id="lunch" onEdit={onEdit} minutes={minutes} />
+    </Moment>
+  );
+}
+
+function EveningCard({ state, date, onEdit, onRescue, onQuick }) {
+  const now = useNow(30000);
+  const d = state.days[date] || {};
+  const x = new Date(now);
+  const minutes = x.getHours() * 60 + x.getMinutes();
+  const ids = sortByTime(state, date, DAY_TYPES[dayTypeFor(state, date)].meals.filter((id) => id !== 'bkf' && id !== 'lunch'));
+  const evening = state.supps.filter((s) => s.when === 'evening');
+  const water = (d.water || 0) >= state.settings.water ? 1 : 0;
+  const done = countOn(d, ids) + water + evening.filter((s) => suppOn(d, s.id)).length;
+  const total = ids.length + 1 + evening.length;
+  return (
+    <Moment id="evening" title="Après-midi et soir" icon="Moon" done={done} total={total}>
+      {ids.map((id) => <MealRow key={id} state={state} date={date} id={id} onEdit={onEdit} minutes={minutes} />)}
+      <div className="rounded-xl border border-line bg-raised/60 px-3.5 py-3"><Hydration state={state} date={date} /></div>
+      <SuppRows state={state} date={date} when="evening" />
+      <div className="grid gap-2 mt-1.5">
         <Btn icon="PencilLine" onClick={onQuick}>Saisir des calories (repas libre)</Btn>
         <Btn icon="LifeBuoy" onClick={onRescue}>J’ai oublié un repas</Btn>
       </div>
-    </Card>
+    </Moment>
+  );
+}
+
+// ───────────── Fil de la journée : où j'en suis ─────────────
+function DayFlow({ state, date }) {
+  const d = state.days[date] || {};
+  const sch = scheduleOn(state, date);
+  const type = dayTypeFor(state, date);
+  const evIds = DAY_TYPES[type].meals.filter((id) => id !== 'bkf' && id !== 'lunch');
+  const steps = [
+    { k: 'morning', label: 'Matin', icon: 'Sunrise', ok: !!d.wake && !!d.meals?.bkf },
+    { k: 'midday', label: 'Midi', icon: 'Utensils', ok: !!d.meals?.lunch },
+  ];
+  if (sch && (sch.type === 'gym' || sch.type === 'run')) {
+    const g = state.gym[date];
+    steps.push({ k: 'session', label: sch.type === 'gym' ? 'Séance' : 'Course', icon: sch.type === 'gym' ? 'Dumbbell' : 'Footprints',
+      ok: sch.type === 'gym' ? !!(g && Object.values(g.ex || {}).some((l) => l.some((x) => x.done))) : !!state.runs[date] });
+  }
+  steps.push({ k: 'evening', label: 'Soir', icon: 'Moon', ok: evIds.every((id) => d.meals?.[id]) && (d.water || 0) >= state.settings.water });
+  steps.push({ k: 'steps', label: 'Pas', icon: 'Footprints', ok: d.pacerio?.steps > 0 || d.pacerio?.kcal > 0 });
+  const go = (k) => { const el = document.getElementById(`flow-${k}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  const next = steps.find((x) => !x.ok);
+  return (
+    <div className="mb-3">
+      <div className="flex gap-1.5" role="group" aria-label="Fil de la journée">
+        {steps.map((x) => (
+          <button key={x.k} type="button" onClick={() => go(x.k)} aria-label={`${x.label} : ${x.ok ? 'fait' : 'à faire'}`}
+            className={cx('flex-1 min-w-0 rounded-xl border px-1 py-2 flex flex-col items-center gap-1 text-[11.5px] font-semibold', x.ok ? 'border-good/50 bg-good/10 text-good' : x === next ? 'border-accent/60 bg-accent/10 text-text' : 'border-line bg-raised text-muted')}>
+            <Icon name={x.ok ? 'CircleCheck' : x.icon} size={18} />
+            <span className="truncate max-w-full">{x.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -576,7 +749,7 @@ function LateBanner({ state, date }) {
   const now = useNow(30000);
   if (date !== todayISO()) return null;
   const type = dayTypeFor(state, date);
-  const times = state.settings.times[type];
+  const times = Object.fromEntries(DAY_TYPES[type].meals.map((id) => [id, mealTime(state, date, id)]));
   const x = new Date(now);
   const minutes = x.getHours() * 60 + x.getMinutes();
   const late = DAY_TYPES[type].meals.filter((id) => !state.days[date]?.meals?.[id] && minutes - toMin(times[id]) >= 30)
@@ -603,17 +776,22 @@ export default function Today({ go }) {
   const [quick, setQuick] = useState(false);
   const [rescue, setRescue] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [supps, setSupps] = useState(false);
   return (
     <div>
       <DayNav date={date} back={back} setBack={setBack} />
       <LateBanner state={state} date={date} />
       <WeightHero state={state} date={date} />
-      <TodayPlan state={state} date={date} go={go} />
-      {date === today && dow(date) === 0 && <SundayCard go={go} state={state} />}
-      <Checklist state={state} date={date} onRescue={() => setRescue(true)} onQuick={() => setQuick(true)} onEdit={setEditId} />
+      <DayFlow state={state} date={date} />
       <RemainingCard state={state} date={date} onQuick={() => setQuick(true)} />
-      <PacerioCard state={state} date={date} />
+      <MorningCard state={state} date={date} onEdit={setEditId} onSupps={() => setSupps(true)} />
+      <MiddayCard state={state} date={date} onEdit={setEditId} />
+      <div id="flow-session" style={{ scrollMarginTop: 72 }}><TodayPlan state={state} date={date} go={go} /></div>
+      <EveningCard state={state} date={date} onEdit={setEditId} onRescue={() => setRescue(true)} onQuick={() => setQuick(true)} />
+      <div id="flow-steps" style={{ scrollMarginTop: 72 }}><PacerioCard state={state} date={date} /></div>
+      {date === today && dow(date) === 0 && <SundayCard go={go} state={state} />}
       <CheckinCard state={state} date={date} />
+      <SuppManager state={state} open={supps} onClose={() => setSupps(false)} />
       <QuickAddModal open={quick} onClose={() => setQuick(false)} date={date} />
       <RescueModal open={rescue} onClose={() => setRescue(false)} date={date} />
       {editId && <MealEditModal key={`${date}-${editId}`} state={state} date={date} id={editId} onClose={() => setEditId(null)} />}
