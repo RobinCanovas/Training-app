@@ -1,13 +1,17 @@
 import { useState, useMemo } from 'react';
 import { Card, Btn, Chip, Icon, Segmented, Meter, toast, cx, fmtK } from '../ui.jsx';
 import { A, useAppState, copyText, saveFile } from '../store.js';
-import { MEALS, DAY_TYPES, RECIPES, RESCUE, buildAlarms, weeklyShopping, EXTRA_STOCK } from '../data/nutrition.js';
+import { DAY_TYPES, RECIPES, RESCUE, buildAlarms, weeklyShopping, EXTRA_STOCK, VARIANTS, VARIED, mealFor, dayPlan, variantsFor, rampFactor, rampDeficit, RAMP } from '../data/nutrition.js';
 import { FOODS, CAT_ORDER, fmtQty } from '../data/foods.js';
-import { todayISO, weekIndex, clampWeek, toMin } from '../lib/dates.js';
+import { todayISO, weekIndex, clampWeek, toMin, dow } from '../lib/dates.js';
 import { dayTypeFor, targetsFor } from '../lib/calc.js';
-import { shoppingCost, fmtEur } from '../lib/budget.js';
+import { shoppingCost, fmtEur, costOfItems } from '../lib/budget.js';
+import { WEEKS } from '../data/program.js';
 import { buildIcs } from '../lib/ics.js';
 
+// Composition du jour pour la semaine en cours (avant le départ : semaine 1)
+const planWeek = (date = todayISO()) => Math.max(1, clampWeek(weekIndex(date)));
+const optsOf = (state, week) => ({ week, whey: state.settings.wheyOn !== false, variants: variantsFor(state.settings, week) });
 const ingr = (id, q) => `${FOODS[id].n} · ${fmtQty(id, q)}`;
 
 // Répartition des calories : barre segmentée fine (la légende nomme et chiffre chaque part)
@@ -38,25 +42,34 @@ function MacroSplit({ m }) {
 
 function DayTypes({ state }) {
   const today = todayISO();
+  const week = planWeek(today);
   const [type, setType] = useState(dayTypeFor(state, today));
   const [open, setOpen] = useState(null);
-  const D = DAY_TYPES[type];
+  const D = useMemo(() => dayPlan(type, optsOf(state, week)), [type, week, state.settings]);
   const times = state.settings.times[type];
-  const target = type === 'run' ? state.settings.baseKcal + state.settings.runBonus : state.settings.baseKcal;
-  const list = D.meals.slice().sort((a, b) => toMin(times[a]) - toMin(times[b]));
+  const ramp = rampDeficit(week);
+  const base = state.settings.baseKcal - ramp;
+  const tStd = base, tRun = base + state.settings.runBonus;
+  const target = type === 'run' ? tRun : tStd;
+  const list = D.meals.slice().sort((a, b) => toMin(times[a.id]) - toMin(times[b.id]));
   return (
     <div>
-      <Segmented className="mb-3" options={[{ id: 'std', label: `Standard · ${fmtK(state.settings.baseKcal)} kcal` }, { id: 'run', label: `Course · ${fmtK(state.settings.baseKcal + state.settings.runBonus)} kcal` }]} value={type} onChange={setType} />
+      <Segmented className="mb-3" options={[{ id: 'std', label: `Standard · ${fmtK(tStd)} kcal` }, { id: 'run', label: `Course · ${fmtK(tRun)} kcal` }]} value={type} onChange={setType} />
+      {ramp > 0 && (
+        <div className="mb-3 rounded-2xl border border-accent/40 bg-accent/10 px-4 py-3 text-[13.5px] leading-snug">
+          <b>Semaine {week} : montée progressive.</b> Le shake est dosé à {Math.round(rampFactor(week) * 100)} % ; il passe à la dose pleine à la semaine {RAMP.length + 1}. Tes repas solides restent identiques, seul le shake monte : pas de choc pour l’estomac, et un seul levier à retenir.
+        </div>
+      )}
       <Card title="Total de la journée" icon="Flame" right={<Chip className="num">cible {fmtK(target)} kcal</Chip>}>
         <div className="flex items-end justify-between mb-3">
           <div className="text-[40px] leading-none font-bold num">{fmtK(D.macros.k)}<span className="text-[16px] text-muted font-semibold ml-1">kcal</span></div>
           <div className="text-[13px] text-muted num pb-1">{D.macros.k >= target ? '+' : '−'}{Math.abs(D.macros.k - target)} vs cible</div>
         </div>
         <MacroSplit m={D.macros} />
-        <div className="text-[12.5px] text-muted mt-3 leading-snug">Protéines et glucides sont des minimums (≥ {state.settings.protein} g et ≥ {state.settings.carbMin} g) : dépasser ne pose pas de problème. Les quantités sont en poids cru ; pèse tes aliments les 2 premières semaines.</div>
+        <div className="text-[12.5px] text-muted mt-3 leading-snug">Protéines et glucides sont des minimums (≥ {state.settings.protein} g et ≥ {state.settings.carbMin} g) : dépasser ne pose pas de problème. Les quantités sont en poids cru ; pèse-les les deux premières semaines, puis tu les reconnaîtras à l’œil.</div>
       </Card>
-      {list.map((id) => {
-        const m = MEALS[id];
+      {list.map((m) => {
+        const id = m.id;
         const isOpen = open === id;
         return (
           <section key={id} className="card mb-3">
@@ -82,13 +95,85 @@ function DayTypes({ state }) {
   );
 }
 
-function Recipes() {
+// ───────────── Varier : changer de menu sans changer d'objectif ─────────────
+function Switch({ on, onChange, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} className={cx('w-12 h-7 rounded-full border relative transition flex-none', on ? 'bg-accent border-accent' : 'bg-raised border-line')}>
+      <span className={cx('absolute top-0.5 w-5 h-5 rounded-full bg-text transition-all', on ? 'left-[22px] !bg-accent-ink' : 'left-0.5')} />
+    </button>
+  );
+}
+
+function Vary({ state, setUi }) {
+  const S = state.settings;
+  const week = planWeek();
+  const cur = variantsFor(S, week);
+  const [open, setOpen] = useState(null);
+  const eur = (items) => { const c = costOfItems(items, state.budget.prices); return c.missing === 0 && c.cost > 0 ? fmtEur(c.cost, 2) : null; };
+  const shake = mealFor('shake', optsOf(state, week));
+  return (
+    <div>
+      <div className="text-[13.5px] text-muted mb-3 leading-snug">Choisis ce que tu manges au petit-déjeuner, à midi et le soir. Chaque variante vise les mêmes calories et les mêmes protéines que le menu de base : les restants du jour, les recettes, la liste de courses et le budget suivent automatiquement. Les repas déjà cochés gardent le menu qui était choisi ce jour-là.</div>
+      <Card title="Rotation automatique" icon="Shuffle" right={<Switch on={!!S.rotate} onChange={(v) => A.setSettings({ rotate: v })} label="Rotation automatique des menus" />}>
+        <div className="text-[13.5px] text-muted leading-snug">{S.rotate ? 'Les menus changent chaque semaine, dans un ordre décalé d’un repas à l’autre : tu ne manges jamais le même trio deux semaines de suite. Ton choix manuel est mis de côté.' : 'Désactivée : le menu que tu choisis ci-dessous reste le même jusqu’à ce que tu le changes.'}</div>
+      </Card>
+      {VARIED.map((mid) => {
+        const meal = mealFor(mid, { variant: cur[mid] });
+        return (
+          <Card key={mid} title={`${meal.name}`} icon={meal.icon}>
+            <div className="grid gap-2">
+              {VARIANTS[mid].map((v) => {
+                const on = cur[mid] === v.id;
+                const isOpen = open === v.id;
+                const cost = eur(v.items);
+                return (
+                  <div key={v.id} className={cx('rounded-xl border', on ? 'border-accent bg-accent/10' : 'border-line bg-raised/60')}>
+                    <div className="flex items-center gap-2 px-3 py-2.5">
+                      <button type="button" role="radio" aria-checked={on} disabled={!!S.rotate} aria-label={`${meal.name} : ${v.title}`} onClick={() => { A.setVariant(mid, v.id); toast(`${meal.name} : ${v.title}`, 'good'); }}
+                        className="min-w-0 flex-1 text-left flex items-center gap-2.5 disabled:opacity-100">
+                        <span className={cx('w-5 h-5 rounded-full border-2 flex-none inline-flex items-center justify-center', on ? 'border-accent' : 'border-line')}>{on && <span className="w-2.5 h-2.5 rounded-full bg-accent" />}</span>
+                        <span className="min-w-0">
+                          <span className="block text-[15px] font-semibold leading-tight">{v.title}</span>
+                          <span className="block text-[12.5px] text-muted num leading-tight mt-0.5">{v.tag} · {v.macros.k} kcal · {v.macros.p} g P{cost ? ` · ${cost}` : ''}</span>
+                        </span>
+                      </button>
+                      <button type="button" aria-label={`Recette ${v.title}`} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : v.id)} className="w-9 h-9 rounded-lg inline-flex items-center justify-center text-muted flex-none">
+                        <Icon name={isOpen ? 'ChevronUp' : 'ChevronDown'} size={18} />
+                      </button>
+                    </div>
+                    {isOpen && (
+                      <div className="px-3.5 pb-3 text-[13.5px]">
+                        <ul className="text-muted leading-snug">{v.items.map(([fid, q]) => <li key={fid}>{ingr(fid, q)}</li>)}</ul>
+                        <div className="mt-1.5 text-muted leading-snug">{v.how}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })}
+      <Card title="Shake et whey" icon="GlassWater" right={<Switch on={S.wheyOn !== false} onChange={(v) => A.setSettings({ wheyOn: v })} label="Whey dans le shake" />}>
+        <div className="text-[13.5px] text-muted leading-snug">{S.wheyOn !== false
+          ? 'Le shake contient 25 g de whey (≈ 20 g de protéines). Pas encore de whey ? Décoche : le shake se fait sans, il perd ≈ 100 kcal et 20 g de protéines, et la whey sort de la liste de courses et du budget.'
+          : 'Shake sans whey pour l’instant : il fait ' + shake.macros.k + ' kcal et ' + shake.macros.p + ' g de protéines. Compense avec un skyr ou un œuf en plus. Active la whey dès que tu en as : tout se recalcule.'}</div>
+        <div className="text-[13px] mt-2 num"><b>Cette semaine :</b> {shake.macros.k} kcal · {shake.macros.p} g P (dose {Math.round(rampFactor(week) * 100)} %)</div>
+        <Btn size="sm" className="mt-3" icon="Wallet" onClick={() => setUi({ tab: 'budget', budgetSub: 'prices' })}>Voir le prix de la whey dans Compta</Btn>
+      </Card>
+    </div>
+  );
+}
+
+function Recipes({ state }) {
   const date = todayISO();
+  const shake = mealFor('shake', optsOf(state, planWeek(date)));
   const [open, setOpen] = useState('liquid');
   return (
     <div>
       <div className="text-[13.5px] text-muted mb-3 leading-snug">Sept repas qui demandent moins de 5 minutes. « Ajouter » les compte dans tes restants du jour.</div>
-      {RECIPES.map((r) => {
+      {RECIPES.map((r0) => {
+        const r = r0.id === 'liquid' ? { ...r0, items: shake.items, macros: shake.macros } : r0;
         const isOpen = open === r.id;
         return (
           <section key={r.id} className={cx('card mb-3', r.id === 'liquid' && 'border-accent/50')}>
@@ -133,12 +218,14 @@ function Stepper({ label, value, onChange, min = 0, max = 7 }) {
 
 function Shopping({ state, setUi }) {
   const today = todayISO();
-  const wkKey = `S${clampWeek(weekIndex(today))}`;
+  const [ahead, setAhead] = useState(dow(today) === 0 ? 1 : 0);
+  const week = Math.min(WEEKS, planWeek(today) + ahead);
+  const wkKey = `S${week}`;
   const [stdDays, setStd] = useState(5);
   const [runDays, setRun] = useState(2);
   const [margin, setMargin] = useState(true);
   const checked = state.shop[wkKey] || {};
-  const lines = useMemo(() => weeklyShopping({ stdDays, runDays, margin }), [stdDays, runDays, margin]);
+  const lines = useMemo(() => weeklyShopping({ stdDays, runDays, margin, ...optsOf(state, week) }), [stdDays, runDays, margin, week, state.settings]);
   const byCat = CAT_ORDER.map((c) => ({ cat: c, rows: lines.filter((l) => l.cat === c).sort((a, b) => a.name.localeCompare(b.name, 'fr')) })).filter((g) => g.rows.length);
   const done = lines.filter((l) => checked[l.id]).length;
   const cost = useMemo(() => shoppingCost(lines, state.budget.prices), [lines, state.budget.prices]);
@@ -149,7 +236,7 @@ function Shopping({ state, setUi }) {
     return `${l.packs} × ${l.packLabel}`;
   };
   const toText = () => {
-    const out = [`Courses — semaine ${wkKey.slice(1)} (${stdDays} jours standard + ${runDays} jours de course${margin ? ', +10 %' : ''})`, ''];
+    const out = [`Courses — semaine ${week} (${stdDays} jours standard + ${runDays} jours de course${margin ? ', +10 %' : ''})`, ''];
     for (const g of byCat) { out.push(g.cat.toUpperCase()); g.rows.forEach((l) => out.push(`- ${l.name} : ${fmtK(l.total)} ${l.unit} (${hint(l)})`)); out.push(''); }
     out.push('COMPLÉMENTS (stock)'); EXTRA_STOCK.forEach((e) => out.push(`- ${e.name}`));
     return out.join('\n');
@@ -158,6 +245,7 @@ function Shopping({ state, setUi }) {
 
   return (
     <div>
+      <Segmented className="mb-3" options={[{ id: 0, label: `Semaine ${planWeek(today)}` }, { id: 1, label: `Semaine ${Math.min(WEEKS, planWeek(today) + 1)}` }]} value={ahead} onChange={setAhead} />
       <Card title="Générateur de la semaine" icon="ShoppingBasket" right={<Chip tone={done === lines.length ? 'good' : undefined} className="num">{done}/{lines.length}</Chip>}>
         <Stepper label="Jours standard" value={stdDays} onChange={(v) => { setStd(v); }} />
         <Stepper label="Jours de course" value={runDays} onChange={(v) => setRun(v)} />
@@ -229,7 +317,7 @@ function Alarms({ state }) {
         </div>
       </Card>
       <Card title="Dans Calendrier (notifications)" icon="CalendarPlus">
-        <div className="text-[13.5px] text-muted leading-snug">Alternative rapide : un fichier .ics qui crée tous ces rendez-vous répétés dans Calendrier, avec une notification à l’heure dite, jusqu’au 1ᵉʳ avril 2027. Une notification n’est pas un réveil : elle respecte le mode silencieux et les Focus. Pour un vrai réveil, garde Horloge.</div>
+        <div className="text-[13.5px] text-muted leading-snug">Alternative rapide : un fichier .ics qui crée tous ces rendez-vous répétés dans Calendrier, avec une notification à l’heure dite, jusqu’au 4 avril 2027. Une notification n’est pas un réveil : elle respecte le mode silencieux et les Focus. Pour un vrai réveil, garde Horloge.</div>
         <Btn className="w-full mt-3" icon="Download" onClick={exportIcs}>Exporter pour Calendrier (.ics)</Btn>
         {note && <div className="mt-2.5 text-[13.5px] text-warn leading-snug" role="status">{note}</div>}
       </Card>
@@ -245,9 +333,10 @@ export default function Nutrition({ ui, setUi }) {
   const sub = ui.nutriSub || 'days';
   return (
     <div>
-      <Segmented className="mb-3" options={[{ id: 'days', label: 'Jours' }, { id: 'recipes', label: 'Recettes' }, { id: 'shop', label: 'Courses' }, { id: 'alarms', label: 'Alarmes' }]} value={sub} onChange={(v) => setUi({ nutriSub: v })} />
+      <Segmented compact className="mb-3" options={[{ id: 'days', label: 'Jours' }, { id: 'vary', label: 'Varier' }, { id: 'recipes', label: 'Recettes' }, { id: 'shop', label: 'Courses' }, { id: 'alarms', label: 'Alarmes' }]} value={sub} onChange={(v) => setUi({ nutriSub: v })} />
       {sub === 'days' && <DayTypes state={state} />}
-      {sub === 'recipes' && <Recipes />}
+      {sub === 'vary' && <Vary state={state} setUi={setUi} />}
+      {sub === 'recipes' && <Recipes state={state} />}
       {sub === 'shop' && <Shopping state={state} setUi={setUi} />}
       {sub === 'alarms' && <Alarms state={state} />}
     </div>

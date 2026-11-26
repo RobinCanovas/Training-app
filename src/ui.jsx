@@ -57,12 +57,12 @@ export function Meter({ value, max, done, tone = 'accent', height = 8 }) {
   );
 }
 
-export function Segmented({ options, value, onChange, className = '' }) {
+export function Segmented({ options, value, onChange, className = '', compact = false }) {
   return (
     <div className={cx('grid gap-1 p-1 rounded-xl bg-raised border border-line', className)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }} role="tablist">
       {options.map((o) => (
         <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => onChange(o.id)}
-          className={cx('min-h-[38px] rounded-lg px-1 text-[13.5px] font-semibold transition', value === o.id ? 'bg-surface text-text border border-line' : 'text-muted border border-transparent')}>
+          className={cx('min-h-[38px] rounded-lg px-0.5 font-semibold transition', compact ? 'text-[12.5px]' : 'text-[13.5px]', value === o.id ? 'bg-surface text-text border border-line' : 'text-muted border border-transparent')}>
           {o.label}
         </button>
       ))}
