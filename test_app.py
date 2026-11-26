@@ -100,7 +100,7 @@ def seed_state():
     """Six semaines de données fictives (test uniquement) pour juger les courbes."""
     import random
     random.seed(7)
-    start = datetime.date(2026, 11, 25)
+    start = datetime.date(2026, 11, 30)
     weights, gym, runs = {}, {}, {}
     for d in range(0, 44):
         day = start + datetime.timedelta(days=d)
@@ -122,7 +122,7 @@ with sync_playwright() as pw:
     browser = pw.chromium.launch()
 
     # ───────────── Parcours 0 : appareil neuf, onglet Stats vide ─────────────
-    ctx0, page0 = make_context(browser, datetime.datetime(2026, 11, 25, 15, 30, 0))
+    ctx0, page0 = make_context(browser, datetime.datetime(2026, 12, 2, 15, 30, 0))
     page0.goto('https://app.test/')
     page0.wait_for_selector('.app-header')
 
@@ -134,8 +134,8 @@ with sync_playwright() as pw:
         ok('tuiles sans données', page0.get_by_text('dès 2 semaines de pesées').is_visible())
     ctx0.close()
 
-    # ───────────── Parcours 1 : mercredi 25/11/2026, 15 h 30, appareil neuf ─────────────
-    ctx, page = make_context(browser, datetime.datetime(2026, 11, 25, 15, 30, 0))
+    # ───────────── Parcours 1 : mercredi 2/12/2026 (semaine 1), 15 h 30, appareil neuf ─────────────
+    ctx, page = make_context(browser, datetime.datetime(2026, 12, 2, 15, 30, 0))
     page.goto('https://app.test/')
     page.wait_for_selector('.app-header', timeout=15000)
 
@@ -143,22 +143,44 @@ with sync_playwright() as pw:
     def _():
         ok('titre de l’onglet', page.locator('h1').inner_text() == 'Aujourd’hui', page.locator('h1').inner_text())
         ok('jauge : 65,0 kg au départ', page.get_by_text('65,0').first.is_visible())
-        ok('compte à rebours J−127', page.get_by_text('J−127').is_visible())
+        ok('compte à rebours J−123', page.get_by_text('J−123').is_visible())
         ok('semaine 1/18', page.get_by_text('Semaine 1/18').is_visible())
         ok('alerte repas en retard (2)', page.get_by_text('2 repas pas cochés').is_visible())
-        ok('cible 3 100 kcal affichée', page.get_by_text(re.compile(r'3\W100 kcal')).first.is_visible())
+        ok('cible 2 764 kcal affichée (semaine 1)', page.get_by_text(re.compile(r'2\W764 kcal')).first.is_visible())
+        ok('fil de la journée', page.get_by_role('group', name='Fil de la journée').is_visible())
+        ok('montée progressive annoncée', page.get_by_text('Montée progressive').first.is_visible())
         shot(page, '01_today_top.png')
 
-    @step('Séance retirée aujourd’hui (une fois, au démarrage)')
+    @step('Séance : retirer et remettre')
     def _():
-        page.wait_for_timeout(400)
+        ok('carnet proposé', page.get_by_role('button', name='Ouvrir le carnet').is_visible())
+        page.get_by_role('button', name=re.compile('^Retirer cette séance')).click()
         ok('séance retirée affichée', page.get_by_text('Séance retirée').first.is_visible())
-        ok('pas de carnet proposé', page.get_by_role('button', name='Ouvrir le carnet').count() == 0)
         page.get_by_role('button', name='Remettre la séance').click()
         ok('séance remise', page.get_by_role('button', name='Ouvrir le carnet').is_visible())
         page.get_by_role('button', name=re.compile('^Retirer cette séance')).click()
         ok('retirée de nouveau', page.get_by_text('Séance retirée').first.is_visible())
         shot(page, '01b_today_skipped.png')
+
+    @step('Matin : réveil, compléments')
+    def _():
+        page.get_by_label('Heure de réveil').fill('07:10')
+        ok('petit-déjeuner déduit du réveil', page.get_by_text('Petit-déjeuner visé à 07:40').is_visible())
+        page.get_by_role('button', name='Mes compléments').click()
+        page.get_by_role('button', name='Zinc', exact=True).click()
+        ok('Zinc ajouté', page.get_by_role('button', name='Retirer Zinc').count() == 1)
+        page.get_by_role('button', name='Retirer Créatine monohydrate').click()
+        page.get_by_role('button', name=re.compile('^Confirmer le retrait')).click()
+        page.get_by_role('button', name='Fermer').last.click()
+        ok('créatine retirée de la journée', page.get_by_role('button', name=re.compile('^Créatine monohydrate')).count() == 0)
+        zinc = page.get_by_role('button', name='Zinc dose de l’étiquette')
+        ok('zinc le soir', zinc.is_visible())
+        zinc.click()
+        ok('zinc coché', zinc.get_attribute('aria-pressed') == 'true')
+        page.get_by_role('button', name='Mes compléments').click()
+        page.get_by_role('button', name='Créatine monohydrate', exact=True).click()
+        page.get_by_role('button', name='Fermer').last.click()
+        ok('créatine remise', page.get_by_role('button', name='Créatine monohydrate 5 g').count() == 1)
 
     @step('Repas : calories réelles et saisie libre')
     def _():
@@ -182,11 +204,11 @@ with sync_playwright() as pw:
     def _():
         page.get_by_role('button', name='Petit-déjeuner : à faire').click()
         ok('petit-déjeuner coché', page.get_by_role('button', name='Petit-déjeuner : fait').is_visible())
-        ok('restants kcal = 2 311', page.get_by_text(re.compile(r'Reste 2\W311 kcal')).is_visible())
+        ok('restants kcal = 1 975', page.get_by_text(re.compile(r'Reste 1\W975 kcal')).is_visible())
         page.get_by_role('button', name='500 ml', exact=True).click()
         ok('hydratation 0,50 L', page.get_by_text('0,50').first.is_visible())
-        page.get_by_role('button', name='Créatine 5 grammes').click()
-        ok('créatine cochée', page.get_by_role('button', name='Créatine 5 grammes').get_attribute('aria-pressed') == 'true')
+        page.get_by_role('button', name='Créatine monohydrate 5 g').click()
+        ok('créatine cochée', page.get_by_role('button', name='Créatine monohydrate 5 g').get_attribute('aria-pressed') == 'true')
         page.get_by_role('button', name=re.compile('Détails Déjeuner')).click()
         ok('détail du déjeuner', page.get_by_text('Riz basmati (cru)').is_visible())
 
@@ -195,13 +217,13 @@ with sync_playwright() as pw:
         page.get_by_label('Nombre de pas').fill('9500')
         page.get_by_label('Calories actives').fill('1030')
         page.get_by_role('button', name='Valider').click()
-        ok('cible = 3 530 (bonus 430)', page.get_by_text(re.compile(r'3\W530 kcal')).first.is_visible())
+        ok('cible = 3 194 (bonus 430)', page.get_by_text(re.compile(r'3\W194 kcal')).first.is_visible())
         page.get_by_role('button', name='Coller').click()
         page.get_by_label('Données à importer').fill('8450 pas, 620 kcal')
         page.get_by_role('button', name='Importer').click()
         page.wait_for_timeout(150)
         ok('pas importés', page.get_by_label('Nombre de pas').input_value() == '8450', page.get_by_label('Nombre de pas').input_value())
-        ok('cible = 3 120 (bonus 20)', page.get_by_text(re.compile(r'3\W120 kcal')).first.is_visible())
+        ok('cible = 2 784 (bonus 20)', page.get_by_text(re.compile(r'2\W784 kcal')).first.is_visible())
 
     @step('Ajout rapide et oubli de repas')
     def _():
@@ -267,9 +289,9 @@ with sync_playwright() as pw:
         tab(page, 'Nutrition')
         ok('type de jour = Course (course saisie aujourd’hui)', page.get_by_role('tab', name=re.compile(r'^Course ·')).get_attribute('aria-selected') == 'true')
         page.get_by_role('tab', name=re.compile(r'^Standard ·')).click()
-        ok('jour standard 3 112 kcal', page.get_by_text(re.compile(r'3\W112')).first.is_visible())
+        ok('jour standard 2 775 kcal (semaine 1)', page.get_by_text(re.compile(r'2\W775')).first.is_visible())
         page.get_by_role('tab', name=re.compile(r'^Course ·')).click()
-        ok('jour de course 3 630', page.get_by_text(re.compile(r'3\W630')).first.is_visible())
+        ok('jour de course 3 293 (semaine 1)', page.get_by_text(re.compile(r'3\W293')).first.is_visible())
         shot(page, '07_nutri_days.png')
         page.get_by_role('tab', name='Recettes').click()
         ok('recette Liquid Mass', page.get_by_text('Shake Liquid Mass').first.is_visible())
@@ -284,6 +306,31 @@ with sync_playwright() as pw:
         ok('alarme 07:30', page.get_by_text('07:30').first.is_visible())
         shot(page, '09_nutri_alarms.png')
 
+    @step('Varier : menus, rotation, whey')
+    def _():
+        tab(page, 'Nutrition')
+        page.get_by_role('tab', name='Varier').click()
+        ok('trois repas variables', page.get_by_text('Petit-déjeuner', exact=True).first.is_visible() and page.get_by_text('Dîner', exact=True).first.is_visible())
+        page.get_by_role('radio', name='Dîner : Pâtes thon – tomate').click()
+        ok('dîner choisi', page.get_by_role('radio', name='Dîner : Pâtes thon – tomate').get_attribute('aria-checked') == 'true')
+        shot(page, '07b_varier.png', True)
+        page.get_by_role('tab', name='Courses').click()
+        ok('courses : thon ajouté', page.get_by_text('Thon au naturel (égoutté)').first.is_visible())
+        ok('courses : bœuf haché retiré', page.get_by_text('Bœuf haché').count() == 0)
+        ok('courses : whey présente', page.get_by_text('Whey (poudre)').count() >= 1)
+        page.get_by_role('tab', name='Varier').click()
+        page.get_by_role('switch', name='Whey dans le shake').click()
+        page.get_by_role('tab', name='Courses').click()
+        ok('courses : whey retirée', page.get_by_text('Whey (poudre)').count() == 0)
+        page.get_by_role('tab', name='Varier').click()
+        page.get_by_role('switch', name='Whey dans le shake').click()
+        page.get_by_role('switch', name='Rotation automatique des menus').click()
+        ok('rotation : choix verrouillés', page.get_by_role('radio', name='Dîner : Pâtes thon – tomate').is_disabled())
+        page.get_by_role('switch', name='Rotation automatique des menus').click()
+        tab(page, 'Aujourd’hui')
+        ok('dîner du jour = menu choisi', page.get_by_text('Pâtes thon – tomate').first.is_visible())
+        ok('déjeuner déjà coché garde son menu', page.get_by_text('Riz – poulet – légumes').first.is_visible())
+
     @step('Santé : matériel et bilan sanguin')
     def _():
         tab(page, 'Santé')
@@ -291,7 +338,7 @@ with sync_playwright() as pw:
         ok('matériel 1/14', page.get_by_text('1/14').first.is_visible())
         shot(page, '10_health_gear.png')
         page.get_by_role('tab', name='Sang').click()
-        ok('fenêtre S12', page.get_by_text(re.compile(r'10 févr\. → 16 févr\. 2027')).is_visible())
+        ok('fenêtre S12', page.get_by_text(re.compile(r'15 févr\. → 21 févr\. 2027')).is_visible())
         page.get_by_label('Testostérone totale au bilan de départ').fill('18,5')
         page.get_by_label('Testostérone totale au contrôle de la semaine 12').fill('20')
         ok('écart calculé Δ +1,50', page.get_by_text('Δ +1,50').is_visible())
@@ -315,14 +362,14 @@ with sync_playwright() as pw:
         page.get_by_role('button', name='Exporter (JSON)').click()
         page.wait_for_timeout(200)
         dl = page.evaluate('window.__lastDownload')
-        ok('téléchargement proposé', dl and dl['filename'] == 'cap72-sauvegarde-2026-11-25.json', str(dl and dl['filename']))
+        ok('téléchargement proposé', dl and dl['filename'] == 'cap72-sauvegarde-2026-12-02.json', str(dl and dl['filename']))
         payload = json.loads(dl['data'])
-        ok('export : poids 65,4', payload['data']['weights'].get('2026-11-25') == 65.4, str(payload['data']['weights']))
-        ok('export : séance de salle', '2026-11-25' in payload['data']['gym'])
-        ok('export : course', '2026-11-25' in payload['data']['runs'])
+        ok('export : poids 65,4', payload['data']['weights'].get('2026-12-02') == 65.4, str(payload['data']['weights']))
+        ok('export : séance de salle', '2026-12-02' in payload['data']['gym'])
+        ok('export : course', '2026-12-02' in payload['data']['runs'])
         calls = page.evaluate('window.__calls')
         ids = {c[1] for c in calls if c[0] == 'set'}
-        ok('docs en ligne : core + days + gym', {'cap72/core', 'cap72/days_2026_11', 'cap72/gym_2026_11'} <= ids, str(ids))
+        ok('docs en ligne : core + days + gym', {'cap72/core', 'cap72/days_2026_12', 'cap72/gym_2026_12'} <= ids, str(ids))
         shot(page, '13_data.png')
         page.get_by_role('button', name='Importer en collant le texte').click()
         page.get_by_label('Texte JSON à importer').fill(dl['data'])
@@ -336,7 +383,7 @@ with sync_playwright() as pw:
         page.get_by_label('Calories de base').fill('3200')
         page.get_by_role('button', name='Fermer').last.click()
         tab(page, 'Aujourd’hui')
-        ok('cible mise à jour', page.get_by_text(re.compile(r'3\W2\d\d kcal')).first.is_visible())
+        ok('cible mise à jour', page.get_by_text(re.compile(r'2\W8\d\d kcal')).first.is_visible())
         page.get_by_label('Réglages').click()
         page.get_by_label('Calories de base').fill('3100')
         shot(page, '14_settings.png')
@@ -355,7 +402,7 @@ with sync_playwright() as pw:
     ctx.close()
 
     # ───────────── Parcours 2 : nouvel appareil, localStorage vide, copie en ligne existante ─────────────
-    ctx2, page2 = make_context(browser, datetime.datetime(2026, 11, 25, 18, 0, 0), seed_db=dump)
+    ctx2, page2 = make_context(browser, datetime.datetime(2026, 12, 2, 18, 0, 0), seed_db=dump)
     page2.goto('https://app.test/')
     page2.wait_for_selector('.app-header')
     page2.wait_for_timeout(1500)
@@ -403,6 +450,7 @@ with sync_playwright() as pw:
 
     @step('Dimanche : rappel des mensurations')
     def _():
+        ok('avant le départ', page5.get_by_text('Départ le lundi 30 novembre').is_visible())
         ok('rappel mesures', page5.get_by_text('pas encore de point de départ').is_visible())
         page5.get_by_role('button', name='Prendre mes mesures').click()
         ok('onglet Mesures ouvert', page5.get_by_role('tab', name='Mesures').get_attribute('aria-selected') == 'true')
@@ -424,12 +472,18 @@ with sync_playwright() as pw:
 
     @step('Compta : prix, dépenses, plafond, export')
     def _():
+        tab(page5, 'Aujourd’hui')
+        page5.get_by_role('button', name='Mes compléments').click()
+        page5.get_by_role('button', name='Vitamine D', exact=True).click()
+        page5.get_by_role('button', name='Fermer').last.click()
         tab(page5, 'Compta')
         ok('état vide', page5.get_by_text('Rien de saisi pour l’instant').is_visible())
         page5.get_by_role('tab', name='Prix').click()
         for el in page5.get_by_label(re.compile('^Prix : ')).all():
             el.fill('2')
         page5.get_by_label('Montant : Abonnement salle').fill('30')
+        page5.get_by_label('Prix du pot : Vitamine D').fill('10')
+        page5.get_by_label('Durée d’un pot en semaines : Vitamine D').fill('9')
         page5.get_by_role('tab', name='Dépenses').click()
         page5.get_by_label('Montant de la dépense').fill('12,50')
         page5.get_by_label('Libellé de la dépense').fill('Courses')
@@ -448,6 +502,7 @@ with sync_playwright() as pw:
         ok('dépensé 57,50 €', '57,50 €' in txt, txt[:300])
         ok('plafond : reste', 'Reste' in txt)
         ok('coût d’un jour standard', 'Un jour standard' in txt)
+        ok('conseils de dépense', 'où mettre ton argent' in txt.lower())
         ok('graphique des dépenses', page5.locator('svg.recharts-surface').count() >= 1)
         shot(page5, '41_compta.png', True)
         page5.get_by_role('tab', name='Dépenses').click()
@@ -507,8 +562,16 @@ with sync_playwright() as pw:
             page4.get_by_role('tab', name=sub).click()
             ok(f'360 px · Compta {sub} sans débordement', page4.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
         shot(page4, '33_small_compta.png')
+        tab(page4, 'Nutrition')
+        for sub in ['Jours', 'Varier', 'Recettes', 'Courses', 'Alarmes']:
+            page4.get_by_role('tab', name=sub).click()
+            ok(f'360 px · Nutrition {sub} sans débordement', page4.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
+        over = page4.evaluate("[...document.querySelectorAll('[role=tab]')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent)")
+        ok('360 px · sous-onglets Nutrition entiers', not over, str(over))
+        page4.get_by_role('tab', name='Varier').click()
+        shot(page4, '34_small_varier.png', True)
         tab(page4, 'Aujourd’hui')
-        shot(page4, '30_small_today.png')
+        shot(page4, '30_small_today.png', True)
         tab(page4, 'Sport')
         shot(page4, '31_small_train.png')
         tab(page4, 'Nutrition')
