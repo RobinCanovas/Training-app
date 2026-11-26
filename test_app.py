@@ -541,6 +541,28 @@ with sync_playwright() as pw:
     ctx5.close()
 
     # ───────────── Parcours 4 : petit écran (360 × 740), aucun débordement horizontal ─────────────
+    # ───────────── Parcours 6 : vendredi 27/11 à 0 h 33, avant le départ : revenir à la veille ─────────────
+    ctx6, page6 = make_context(browser, datetime.datetime(2026, 11, 27, 0, 33, 0))
+    page6.goto('https://app.test/')
+    page6.wait_for_selector('.app-header')
+
+    @step('Après minuit, avant le départ : saisir la veille')
+    def _():
+        ok('invitation à compléter la veille', page6.get_by_text('Tu complètes encore la journée d’hier').is_visible())
+        ok('jour précédent actif avant le départ', page6.get_by_role('button', name='Jour précédent').is_enabled())
+        page6.get_by_role('button', name='Hier', exact=True).click()
+        ok('journée d’hier affichée', page6.get_by_text('Hier · tu peux compléter cette journée').is_visible())
+        ok('date d’hier', page6.get_by_text(re.compile(r'jeudi 26 novembre', re.I)).first.is_visible())
+        page6.get_by_label('Heure de réveil').fill('07:00')
+        page6.get_by_role('button', name=re.compile('^Petit-déjeuner : à faire|Petit-déjeuner')).first.click()
+        page6.get_by_role('button', name='Revenir à aujourd’hui').click()
+        page6.get_by_role('button', name='Jour précédent').click()
+        ok('saisie conservée sur la veille', page6.get_by_label('Heure de réveil').input_value() == '07:00')
+        for _ in range(6):
+            page6.get_by_role('button', name='Jour précédent').click()
+        ok('retour limité à 7 jours', page6.get_by_role('button', name='Jour précédent').is_disabled())
+    ctx6.close()
+
     ctx4, page4 = make_context(browser, datetime.datetime(2027, 1, 8, 9, 0, 0), seed_ls=seed, vp=(360, 740))
     page4.goto('https://app.test/')
     page4.wait_for_selector('.app-header')

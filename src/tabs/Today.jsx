@@ -11,8 +11,25 @@ import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, schedu
 const whenLabel = (date) => (date === todayISO() ? 'aujourd’hui' : `le ${fmtShort(date)}`);
 
 // ───────────── Navigation entre les jours ─────────────
+// On peut toujours revenir au moins 7 jours en arrière, même avant le départ : saisir la veille ne doit jamais être bloqué
+const maxBackOf = (today) => Math.max(7, diffDays(today, START_DATE));
+
+// Après minuit, la journée « d'hier » n'est souvent pas finie : on propose d'y revenir en un geste
+function NightBanner({ back, setBack }) {
+  const now = useNow(30000);
+  const h = new Date(now).getHours();
+  if (back !== 0 || h >= 5) return null;
+  return (
+    <div className="mb-3 rounded-2xl border border-blue/40 bg-blue/10 px-4 py-3 flex items-center gap-3" role="status">
+      <Icon name="Moon" size={20} className="text-blue flex-none" />
+      <div className="min-w-0 flex-1 text-[14px] leading-snug">Il est passé minuit. Tu complètes encore la journée d’hier ?</div>
+      <Btn size="sm" onClick={() => setBack(1)}>Hier</Btn>
+    </div>
+  );
+}
+
 function DayNav({ date, back, setBack }) {
-  const maxBack = Math.max(0, diffDays(todayISO(), START_DATE));
+  const maxBack = maxBackOf(todayISO());
   const btn = 'w-11 h-11 rounded-xl bg-raised border border-line inline-flex items-center justify-center disabled:opacity-35';
   return (
     <div className="mb-3">
@@ -772,13 +789,14 @@ export default function Today({ go }) {
   const [back, setBack] = useState(0);
   useNow(60000); // repasse sur le bon jour après minuit
   const today = todayISO();
-  const date = addDays(today, -Math.min(back, Math.max(0, diffDays(today, START_DATE))));
+  const date = addDays(today, -Math.min(back, maxBackOf(today)));
   const [quick, setQuick] = useState(false);
   const [rescue, setRescue] = useState(false);
   const [editId, setEditId] = useState(null);
   const [supps, setSupps] = useState(false);
   return (
     <div>
+      <NightBanner back={back} setBack={setBack} />
       <DayNav date={date} back={back} setBack={setBack} />
       <LateBanner state={state} date={date} />
       <WeightHero state={state} date={date} />
