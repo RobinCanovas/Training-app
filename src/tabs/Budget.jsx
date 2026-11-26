@@ -6,7 +6,7 @@ import { A, useAppState, saveFile, copyText } from '../store.js';
 import { FOODS, CAT_ORDER } from '../data/foods.js';
 import { WEEKS } from '../data/program.js';
 import { todayISO, weekIndex, fmtShort, fmtNum, MONTHS_LONG } from '../lib/dates.js';
-import { CATS, PRICED, foodLines, equipLabel, equipCat, price, fmtEur, planned, spent, costPerKg, dayCosts, expensesCsv } from '../lib/budget.js';
+import { CATS, PRICED, WHEY_GRAMS, foodLines, equipLabel, equipCat, price, fmtEur, planned, spent, costPerKg, dayCosts, expensesCsv } from '../lib/budget.js';
 
 const monthLabel = (m) => { const [y, mo] = m.split('-').map(Number); return `${MONTHS_LONG[mo - 1]} ${y}`; };
 
@@ -30,7 +30,7 @@ function SpendChart({ S }) {
   for (let w = first; w <= last; w++) rows.push({ x: w, v: Math.round((S.byWeek[w] || 0) * 100) / 100 });
   const name = (x) => (x === 0 ? 'Avant le départ' : `Semaine ${x}`);
   return (
-    <ChartCard title="Dépenses par semaine" sub="Euros dépensés chaque semaine du programme (la semaine 1 commence le 25 novembre)."
+    <ChartCard title="Dépenses par semaine" sub="Euros dépensés chaque semaine du programme (la semaine 1 commence le 30 novembre)."
       table={<DataTable head={['Semaine', 'Dépensé']} rows={rows.map((r) => [r.x === 0 ? 'Avant' : `S${r.x}`, fmtEur(r.v)])} />}>
       <div style={{ height: 200 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -49,9 +49,9 @@ function SpendChart({ S }) {
 
 function Summary({ state, setUi }) {
   const B = state.budget;
-  const P = useMemo(() => planned(state), [state.budget]);
+  const P = useMemo(() => planned(state), [state.budget, state.settings, state.supps]);
   const S = useMemo(() => spent(state), [state.budget.expenses]);
-  const day = useMemo(() => dayCosts(B.prices), [B.prices]);
+  const day = useMemo(() => dayCosts(state), [state.budget.prices, state.settings, state.supps]);
   const month = todayISO().slice(0, 7);
   const mSpent = S.byMonth[month] || 0;
   const cap = price(B.cap);
@@ -144,11 +144,70 @@ function Summary({ state, setUi }) {
       )}
 
       {S.count > 0 && <SpendChart S={S} />}
+      <SpendTips state={state} />
     </div>
   );
 }
 
 // ───────────── Prix ─────────────
+function SuppPrices({ state }) {
+  const ids = new Set(PRICED.map((e) => e.id));
+  const list = state.supps.filter((x) => !ids.has(x.id));
+  const wheyP = price(state.budget.prices.whey);
+  const creaP = price(state.budget.prices.creatine);
+  const perKg = Number.isFinite(wheyP) ? wheyP / (WHEY_GRAMS / 1000) : null;
+  return (
+    <Card title="Mes compléments" icon="FlaskConical">
+      <div className="text-[13.5px] leading-snug text-muted">
+        Les compléments de ta liste (Aujourd’hui › Matin › Mes compléments). La whey, la créatine, les oméga-3 et le magnésium se saisissent dans « Matériel · Compléments » ci-dessus.
+        {state.settings.wheyOn === false && ' La whey est désactivée dans « Varier » : elle n’est pas comptée.'}
+      </div>
+      {(perKg != null || Number.isFinite(creaP)) && (
+        <div className="grid gap-1.5 mt-3 text-[14px]">
+          {perKg != null && <div className="flex items-start justify-between gap-3"><span>Whey : une dose de 25 g</span><b className="num flex-none">{fmtEur(wheyP / (WHEY_GRAMS / 25), 2)}</b></div>}
+          {perKg != null && <div className="flex items-start justify-between gap-3"><span>Whey : prix au kilo</span><b className="num flex-none">{fmtEur(perKg, 2)}</b></div>}
+          {Number.isFinite(creaP) && <div className="flex items-start justify-between gap-3"><span>Créatine : une dose de 5 g (≈ 630 g sur le programme)</span><b className="num flex-none">{fmtEur(creaP / 126, 2)}</b></div>}
+        </div>
+      )}
+      {list.length > 0 && (
+        <div className="grid gap-3 mt-3 hair pt-3">
+          {list.map((x) => (
+            <div key={x.id}>
+              <div className="text-[14.5px] font-semibold leading-tight mb-1.5">{x.name}</div>
+              <div className="grid grid-cols-2 gap-2">
+                <NumInput value={x.price ?? ''} suffix="€" placeholder="prix du pot" ariaLabel={`Prix du pot : ${x.name}`} onChange={(v) => A.updateSupp(x.id, { price: v })} />
+                <NumInput value={x.weeks ?? ''} suffix="sem." placeholder="dure" ariaLabel={`Durée d’un pot en semaines : ${x.name}`} onChange={(v) => A.updateSupp(x.id, { weeks: v })} />
+              </div>
+            </div>
+          ))}
+          <div className="text-[12.5px] text-muted leading-snug">« Dure » : combien de semaines un pot te fait tenir. Vide : un seul achat compté.</div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SpendTips({ state }) {
+  const wheyP = price(state.budget.prices.whey);
+  const cap = price(state.budget.cap);
+  return (
+    <Card title="Où mettre ton argent" icon="Lightbulb">
+      <ol className="grid gap-2.5 text-[14px] leading-snug">
+        {[
+          ['La nourriture d’abord.', 'Riz, pâtes, avoine, œufs, lait, poulet : c’est 90 % du résultat et la plus grosse dépense. Marques de distributeur, légumes surgelés, riz et pâtes au kilo.'],
+          ['Balance, shaker, gourde : quelques euros.', 'À acheter avant le lundi, ils décident de ta régularité.'],
+          ['Créatine monohydrate : le complément qui en vaut la peine.', 'Du monohydrate simple suffit (le label Creapure n’est pas indispensable) : 5 g par jour, environ 630 g sur tout le programme.'],
+          ['Whey : pratique, pas obligatoire.', 'Elle apporte 20 g de protéines dans le shake. Prends un sac de 2 kg plutôt que de petits pots, compare le prix au kilo et la teneur en protéines (≈ 75 à 80 g aux 100 g), et ne dépasse pas ≈ 3,2 kg pour 18 semaines. Pas de « mass gainer » : c’est surtout du sucre cher. Sans whey, ajoute du skyr ou des œufs.'],
+          ['Oméga-3, magnésium, vitamine D : seulement avec une raison.', 'Peu de poisson gras, ou un avis médical. Sinon, c’est de la dépense en trop.'],
+        ].map(([t, d], i) => (
+          <li key={i} className="flex gap-3 items-start"><span className="w-6 h-6 flex-none rounded-full bg-raised border border-line text-[12.5px] font-bold inline-flex items-center justify-center mt-0.5">{i + 1}</span><span><b>{t}</b> <span className="text-muted">{d}</span></span></li>
+        ))}
+      </ol>
+      {Number.isFinite(wheyP) && <div className="text-[13.5px] mt-3 hair pt-3 leading-snug">Ta whey : <b className="num">{fmtEur(wheyP / (WHEY_GRAMS / 1000), 2)}</b> le kilo, soit <b className="num">{fmtEur(wheyP / (WHEY_GRAMS / 25), 2)}</b> par shake.{!Number.isFinite(cap) ? ' Fixe un plafond mensuel ci-dessus pour garder la main.' : ''}</div>}
+    </Card>
+  );
+}
+
 function PriceRow({ id, name, hint, value, label }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 hair first:border-0">
@@ -183,10 +242,10 @@ function LineEditor({ line }) {
 
 function Prices({ state }) {
   const B = state.budget;
-  const P = useMemo(() => planned(state), [state.budget]);
-  const day = useMemo(() => dayCosts(B.prices), [B.prices]);
+  const P = useMemo(() => planned(state), [state.budget, state.settings, state.supps]);
+  const day = useMemo(() => dayCosts(state), [state.budget.prices, state.settings, state.supps]);
   const groups = [...new Set(PRICED.map((e) => e.group))];
-  const lines = useMemo(() => foodLines(), []);
+  const lines = useMemo(() => foodLines(state), [state.settings]);
   const byCat = CAT_ORDER.map((c) => ({ cat: c, rows: lines.filter((l) => l.cat === c).sort((a, b) => a.name.localeCompare(b.name, 'fr')) })).filter((g) => g.rows.length);
   const sum = (ids) => ids.reduce((a, id) => a + (price(B.prices[id]) || 0), 0);
 
@@ -216,6 +275,8 @@ function Prices({ state }) {
           </Card>
         );
       })}
+
+      <SuppPrices state={state} />
 
       <Card title="Alimentation · prix d’un paquet" icon="Utensils" right={P.foodSet > 0 ? <Chip className="num">{fmtEur(P.foodWeek, 2)} / sem.</Chip> : null}>
         <div className="text-[13.5px] leading-snug text-muted">

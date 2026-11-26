@@ -1,6 +1,6 @@
 import { EQUIPMENT } from '../data/health.js';
 import { FOODS } from '../data/foods.js';
-import { weeklyShopping, MEALS, DAY_TYPES } from '../data/nutrition.js';
+import { weeklyShopping, MEALS, dayPlan, mealFor, variantsFor } from '../data/nutrition.js';
 import { WEEKS } from '../data/program.js';
 import { weekIndex, todayISO } from './dates.js';
 import { num, latestWeight } from './calc.js';
@@ -22,8 +22,10 @@ const EQUIP_LABEL = { gym: 'Sac de sport et accessoires (l’abonnement se règl
 export const equipCat = (e) => EQUIP_CAT[e.id] || (e.group === 'Compléments' ? 'Compléments' : 'Matériel');
 export const equipLabel = (e) => EQUIP_LABEL[e.id] || e.name;
 
-/** Aliments de la semaine type, sans la whey (comptée avec les compléments). */
-export const foodLines = () => weeklyShopping(FOOD_PLAN).filter((l) => l.cat !== 'Compléments');
+const wheyOn = (state) => state.settings.wheyOn !== false;
+const optsFor = (state, week) => ({ week, whey: wheyOn(state), variants: variantsFor(state.settings, week) });
+/** Aliments d'une semaine type (shake dosé selon la semaine, menus choisis), sans la whey (comptée avec les compléments). */
+export const foodLines = (state, week = WEEKS) => weeklyShopping({ ...FOOD_PLAN, ...optsFor(state, week) }).filter((l) => l.cat !== 'Compléments');
 
 /** Un prix saisi → nombre (NaN si vide ou invalide). */
 export const price = (v) => { const x = num(v); return Number.isFinite(x) && x >= 0 ? x : NaN; };
@@ -60,16 +62,34 @@ export function planned(state) {
   const byCat = Object.fromEntries(CATS.map((c) => [c, 0]));
   let equipSet = 0, linesSet = 0;
   for (const e of PRICED) {
+    if (e.id === 'whey' && !wheyOn(state)) continue; // pas de whey, pas d'achat
     const x = price(B.prices[e.id]);
     if (Number.isFinite(x)) { byCat[equipCat(e)] += x; equipSet++; }
   }
-  const lines = foodLines();
+  const lines = foodLines(state);
   let foodWeek = 0, foodFull = 0, foodSet = 0;
   for (const l of lines) {
     const u = price(B.prices[`food:${l.id}`]);
     if (Number.isFinite(u)) { foodWeek += u * (l.total / FOODS[l.id].pack[0]); foodFull += u * l.packs; foodSet++; }
   }
-  byCat.Alimentation += foodWeek * WEEKS;
+  // sur tout le programme : chaque semaine avec sa dose de shake et ses menus (la montée en charge coûte un peu moins au début)
+  for (let w = 1; w <= WEEKS; w++) {
+    for (const l of foodLines(state, w)) {
+      const u = price(B.prices[`food:${l.id}`]);
+      if (Number.isFinite(u)) byCat.Alimentation += u * (l.total / FOODS[l.id].pack[0]);
+    }
+  }
+  // compléments suivis hors liste « matériel » : prix du pot et durée d'un pot en semaines
+  let suppSet = 0;
+  const equipIds = new Set(PRICED.map((e) => e.id));
+  for (const sp of state.supps) {
+    if (equipIds.has(sp.id)) continue;
+    const x = price(sp.price);
+    if (!Number.isFinite(x)) continue;
+    const wk = Number(String(sp.weeks).replace(',', '.'));
+    byCat.Compléments += x * (wk > 0 ? Math.ceil(WEEKS / wk) : 1);
+    suppSet++;
+  }
   let monthly = 0;
   for (const l of B.lines) {
     const x = price(l.amount);
@@ -82,7 +102,7 @@ export function planned(state) {
   // Régime de croisière : ce qui revient chaque mois (nourriture + abonnements)
   const perMonth = foodWeek * WEEKS_PER_MONTH + monthly;
   return {
-    byCat, total, foodWeek, foodFull, foodSet, foodCount: lines.length, equipSet, equipCount: PRICED.length, linesSet,
+    byCat, total, foodWeek, foodFull, foodSet, foodCount: lines.length, equipSet: equipSet + suppSet, equipCount: PRICED.length + state.supps.filter((sp) => !equipIds.has(sp.id)).length, linesSet,
     perMonth, any: equipSet + foodSet + linesSet > 0,
   };
 }
@@ -128,11 +148,13 @@ export function shoppingCost(lines, prices) {
   return { cost, set, count };
 }
 
-export function dayCosts(prices) {
+export function dayCosts(state, week = WEEKS) {
+  const o = optsFor(state, week);
+  const prices = state.budget.prices;
   return {
-    std: costOfItems(DAY_TYPES.std.items, prices),
-    run: costOfItems(DAY_TYPES.run.items, prices),
-    shake: costOfItems(MEALS.shake.items, prices),
+    std: costOfItems(dayPlan('std', o).items, prices),
+    run: costOfItems(dayPlan('run', o).items, prices),
+    shake: costOfItems(mealFor('shake', o).items, prices),
   };
 }
 
