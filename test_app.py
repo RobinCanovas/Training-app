@@ -351,6 +351,7 @@ with sync_playwright() as pw:
     def _():
         tab(page, 'Stats')
         page.wait_for_timeout(400)
+        ok('repères sourcés : rythme exigé et liens', page.get_by_text(re.compile('Ton objectif demande 0,39 kg par semaine')).count() == 1 and page.get_by_role('link', name='MacroFactor').get_attribute('href').startswith('https://') and page.get_by_role('link', name=re.compile('Jäger')).count() == 1)
         ok('graphique poids rendu', page.locator('svg.recharts-surface').count() >= 2, str(page.locator('svg.recharts-surface').count()))
         page.get_by_role('button', name='Tableau').first.click()
         ok('tableau jumeau', page.get_by_role('columnheader', name='Moyenne').is_visible())
@@ -594,6 +595,12 @@ with sync_playwright() as pw:
         page7.get_by_role('button', name='Marquer Déjeuner comme fait').click()
         ok('plus de retard : le shake de 16 h 30 est proposé', page7.get_by_text('Shake Liquid Mass · 16:30').is_visible())
         shot(page7, '42_now.png')
+        page7.get_by_role('button', name='Marquer Shake Liquid Mass comme fait').click()
+        ok('séance proposée ensuite', page7.get_by_text('Séance de muscu').first.is_visible())
+        page7.get_by_role('button', name='Commencer').click()
+        page7.wait_for_timeout(300)
+        ok('Commencer ouvre le carnet de séance', page7.locator('.tabbar .tab-btn[aria-current=page]').inner_text().strip() == 'Sport')
+        tab(page7, 'Aujourd’hui')
     @step('Objectifs de la semaine et anneau de calories')
     def _():
         ok('anneau de calories', page7.get_by_role('img', name=re.compile('^Calories : ')).is_visible())

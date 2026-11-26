@@ -209,6 +209,31 @@ function Tile({ label, value, sub }) {
   );
 }
 
+function Reperes({ S }) {
+  const need = (S.targetWeight - S.startWeight) / WEEKS;           // kg par semaine nécessaires
+  const pct = (need / S.startWeight) * 100;                        // % du poids par semaine
+  const prot = [Math.round(1.4 * S.startWeight), Math.round(2.0 * S.startWeight)];
+  const a = { target: '_blank', rel: 'noopener noreferrer', className: 'underline decoration-dotted underline-offset-2 text-text' };
+  return (
+    <Card title="Repères : ton objectif est-il réaliste ?" icon="BookOpen">
+      <div className="grid gap-3 text-[14px] leading-snug">
+        <div>
+          <div className="font-bold">Ton objectif demande {fmtNum(need, 2)} kg par semaine ({fmtNum(pct, 2)} % du poids)</div>
+          <p className="text-muted mt-1">Un calculateur de prise de masse (<a href="https://macrofactor.com/bulking-calculator/" {...a}>MacroFactor</a>) donne pour un débutant 0,5 % du poids par semaine comme « juste milieu » et 0,8 % comme rythme agressif ; pour un intermédiaire 0,325 % et 0,575 %. Ton objectif se situe entre les deux : ambitieux. C’est un repère de calculateur, pas une loi : une partie du gain sera du gras ou de l’eau, surtout au-delà de 0,5 kg par semaine (c’est le plafond du coach).</p>
+        </div>
+        <div>
+          <div className="font-bold">Protéines : {prot[0]} à {prot[1]} g par jour</div>
+          <p className="text-muted mt-1">La prise de position de la Société internationale de nutrition sportive retient 1,4 à 2,0 g par kg et par jour pour la plupart des personnes qui s’entraînent (<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC5477153" {...a}>Jäger et al., 2017</a>). Ta cible du jour est un minimum placé en haut de cette zone. Chez toi, ce qui limite la prise, ce sont plutôt les calories (repas oubliés) que les protéines.</p>
+        </div>
+        <div>
+          <div className="font-bold">Ce qui compte le plus</div>
+          <p className="text-muted mt-1">Cocher tes repas tous les jours, charger un peu plus sur les barres quand tu finis toutes les séries, te peser à jeun. Si la balance stagne deux semaines de suite avec les repas cochés, le coach ajoute des calories ; si elle monte trop vite, il en retire.</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function Stats() {
   const state = useAppState();
   const S = state.settings;
@@ -247,6 +272,7 @@ export default function Stats() {
       <LiftsChart state={state} />
       <KmChart state={state} />
       <PaceChart state={state} />
+      <Reperes S={S} />
     </div>
   );
 }

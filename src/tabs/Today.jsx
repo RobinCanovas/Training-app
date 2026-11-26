@@ -820,7 +820,7 @@ function CheckinCard({ state, date }) {
 
 // ───────────── Bandeau d'alerte « repas en retard » ─────────────
 // Carte « Maintenant » : la prochaine chose à faire, cochable en un geste. Remplace l'ancienne alerte repas en retard.
-function NowCard({ state, date }) {
+function NowCard({ state, date, go }) {
   const now = useNow(30000);
   if (date !== todayISO()) return null;
   const d = state.days[date] || {};
@@ -866,6 +866,7 @@ function NowCard({ state, date }) {
     icon = t.sch.type === 'gym' ? 'Dumbbell' : 'Footprints';
     title = t.sch.type === 'gym' ? 'Séance de muscu' : 'Sortie de course';
     sub = `${t.sch.where || 'Aujourd’hui'} · mange ton repas d’avant-séance 1 h 30 avant.`;
+    action = <Btn size="sm" variant="primary" icon="Play" onClick={() => go(t.sch.type === 'gym' ? { tab: 'train', trainSub: 'gym', session: t.sch.id } : { tab: 'train', trainSub: 'run' })}>Commencer</Btn>;
   } else {
     icon = 'Footprints';
     title = 'Pas du soir';
@@ -901,7 +902,7 @@ export default function Today({ go }) {
     <div>
       <NightBanner back={back} setBack={setBack} />
       <DayNav date={date} back={back} setBack={setBack} />
-      <NowCard state={state} date={date} />
+      <NowCard state={state} date={date} go={go} />
       <WeightHero state={state} date={date} />
       <DayFlow state={state} date={date} />
       <RemainingCard state={state} date={date} onQuick={() => setQuick(true)} />
