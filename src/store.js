@@ -141,6 +141,7 @@ function A_tick(s, date, id, on) {
 export const A = {
   setSettings: (patch) => patchAt(['settings'], patch),
   setTime: (type, id, value) => put(['settings', 'times', type, id], value),
+  setFlag: (k, v) => put(['flags', k], v),
   setWeight: (date, kg) => put(['weights', date], kg === '' || kg == null ? undefined : kg),
   patchDay: (date, patch) => patchAt(['days', date], patch),
   // on garde la variante servie ce jour-là : changer de menu plus tard ne réécrit pas l'historique

@@ -640,6 +640,12 @@ with sync_playwright() as pw:
 
     @step('Hors Claude : l’export .ics passe par un téléchargement classique')
     def _():
+        ok('carte Rappels de repas sur Aujourd’hui', page9.get_by_text('Rappels de repas').first.is_visible())
+        with page9.expect_download(timeout=5000) as d0:
+            page9.get_by_role('button', name='Ajouter les rappels au Calendrier').click()
+        ok('rappels téléchargés', d0.value.suggested_filename == 'cap72-alarmes.ics')
+        page9.wait_for_timeout(200)
+        ok('la carte disparaît une fois les rappels exportés', page9.get_by_role('button', name='Ajouter les rappels au Calendrier').count() == 0)
         tab(page9, 'Nutrition')
         page9.get_by_role('tab', name='Alarmes').click()
         with page9.expect_download(timeout=5000) as di:
