@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Card, Btn, Chip, Icon, Meter, Ring, Modal, Field, NumInput, toast, useNow, useArm, cx, fmtK } from '../ui.jsx';
-import { A, useAppState } from '../store.js';
+import { A, useAppState, saveFile } from '../store.js';
 import { MEALS, DAY_TYPES, QUICK, RESCUE, rampFactor } from '../data/nutrition.js';
 import { FOODS, fmtQty } from '../data/foods.js';
 import { weekInfo, SESSIONS, RUN_PLAN, START_DATE, WEEKS } from '../data/program.js';
 import { todayISO, weekIndex, clampWeek, daysToTarget, fmtShort, fmtLong, dow, toMin, fmtNum, diffDays, addDays } from '../lib/dates.js';
 import { measureStatus } from '../lib/body.js';
+import { buildIcs } from '../lib/ics.js';
 import { weekGoals, streak, nextMilestone } from '../lib/goals.js';
 import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, weightTrend, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
 
@@ -764,6 +765,27 @@ function RescueModal({ open, onClose, date }) {
 }
 
 // ───────────── Forme du jour ─────────────
+// Une page web ne peut pas sonner en arrière-plan : le Calendrier de l'iPhone le fait (notification à chaque repas)
+function RemindersCard({ state, date }) {
+  const [note, setNote] = useState('');
+  if (date !== todayISO() || state.flags?.reminders) return null;
+  const exportIcs = async () => {
+    const r = await saveFile('cap72-alarmes.ics', buildIcs(state.settings.times));
+    if (r.ok) { A.setFlag('reminders', 'exported'); toast('Ouvre le fichier pour l’ajouter à Calendrier', 'good'); }
+    else if (r.code === 'declined') toast('Téléchargement annulé');
+    else setNote('Le téléchargement n’est pas disponible ici : onglet Nutrition → Alarmes, crée les alarmes à la main dans Horloge.');
+  };
+  return (
+    <Card title="Rappels de repas" icon="BellRing">
+      <div className="text-[14px] leading-snug">Tu oublies tes repas : fais-toi notifier. Un fichier ajoute au Calendrier de ton iPhone une notification à chaque repas et au shake, jusqu’au 4 avril.</div>
+      <div className="text-[12.5px] text-muted leading-snug mt-1.5">Le fichier se télécharge, puis tu l’ouvres et tu touches « Ajouter tout » dans Calendrier. Il suit les horaires de tes réglages. Une notification respecte le mode silencieux : pour un vrai réveil, garde Horloge.</div>
+      <Btn variant="primary" className="w-full mt-3" icon="CalendarPlus" onClick={exportIcs}>Ajouter les rappels au Calendrier</Btn>
+      {note && <div className="mt-2 text-[13px] text-warn leading-snug" role="status">{note}</div>}
+      <button type="button" onClick={() => A.setFlag('reminders', 'skip')} className="mt-2.5 w-full text-center text-[13px] text-muted underline decoration-dotted underline-offset-2 min-h-[36px]">J’ai déjà mes alarmes, ne plus afficher</button>
+    </Card>
+  );
+}
+
 // Le soir : de quoi préparer demain (le matin, tu n'as ni le temps ni l'énergie de réfléchir)
 function TomorrowCard({ state, date }) {
   const now = useNow(60000);
@@ -931,6 +953,7 @@ export default function Today({ go }) {
       <NightBanner back={back} setBack={setBack} />
       <DayNav date={date} back={back} setBack={setBack} />
       <NowCard state={state} date={date} go={go} />
+      <RemindersCard state={state} date={date} />
       <WeightHero state={state} date={date} />
       <DayFlow state={state} date={date} />
       <RemainingCard state={state} date={date} onQuick={() => setQuick(true)} />

@@ -530,6 +530,8 @@ with sync_playwright() as pw:
         page5.wait_for_timeout(200)
         dl = page5.evaluate('window.__lastDownload')
         ok('.ics exporté', dl and dl['filename'] == 'cap72-alarmes.ics' and dl['data'].count('BEGIN:VEVENT') == 11, str(dl)[:120])
+        import re as _re
+        ok('.ics : points-virgules échappés', not _re.search(r'^(?:DESCRIPTION|SUMMARY):.*(?<!\\);', dl['data'].replace('\r\n ', ''), _re.M))
         page5.evaluate("(() => { const u = window.claude.use; window.__u = u; window.claude.use = async (n) => (n === 'downloads' ? null : u(n)); })()")
         page5.get_by_role('button', name=re.compile('Exporter pour Calendrier')).click()
         ok('repli sans téléchargement', page5.get_by_text('Le téléchargement n’est pas disponible ici').is_visible())
@@ -629,6 +631,27 @@ with sync_playwright() as pw:
         page8.get_by_text(re.compile('Demain ·', re.I)).first.scroll_into_view_if_needed()
         shot(page8, '43_tomorrow.png')
     ctx8.close()
+
+    # ───────────── Parcours 9 : page hébergée hors de Claude (pas de window.claude) : téléchargement classique ─────────────
+    ctx9, page9 = make_context(browser, datetime.datetime(2026, 12, 2, 12, 0, 0))
+    page9.add_init_script('delete window.claude;')
+    page9.goto('https://app.test/')
+    page9.wait_for_selector('.app-header')
+
+    @step('Hors Claude : l’export .ics passe par un téléchargement classique')
+    def _():
+        ok('carte Rappels de repas sur Aujourd’hui', page9.get_by_text('Rappels de repas').first.is_visible())
+        with page9.expect_download(timeout=5000) as d0:
+            page9.get_by_role('button', name='Ajouter les rappels au Calendrier').click()
+        ok('rappels téléchargés', d0.value.suggested_filename == 'cap72-alarmes.ics')
+        page9.wait_for_timeout(200)
+        ok('la carte disparaît une fois les rappels exportés', page9.get_by_role('button', name='Ajouter les rappels au Calendrier').count() == 0)
+        tab(page9, 'Nutrition')
+        page9.get_by_role('tab', name='Alarmes').click()
+        with page9.expect_download(timeout=5000) as di:
+            page9.get_by_role('button', name=re.compile('Exporter pour Calendrier')).click()
+        ok('fichier téléchargé', di.value.suggested_filename == 'cap72-alarmes.ics', di.value.suggested_filename)
+    ctx9.close()
 
     ctx4, page4 = make_context(browser, datetime.datetime(2027, 1, 8, 9, 0, 0), seed_ls=seed, vp=(360, 740))
     page4.goto('https://app.test/')
