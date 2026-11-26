@@ -978,6 +978,7 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
   var A = {
     setSettings: (patch) => patchAt(["settings"], patch),
     setTime: (type, id, value) => put(["settings", "times", type, id], value),
+    setFlag: (k, v) => put(["flags", k], v),
     setWeight: (date, kg) => put(["weights", date], kg === "" || kg == null ? void 0 : kg),
     patchDay: (date, patch) => patchAt(["days", date], patch),
     // on garde la variante servie ce jour-là : changer de menu plus tard ne réécrit pas l'historique
@@ -1244,6 +1245,23 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
     }
   }
   async function saveFile(filename, data) {
+    if (typeof window !== "undefined" && !window.claude) {
+      try {
+        const type = filename.endsWith(".ics") ? "text/calendar" : filename.endsWith(".json") ? "application/json" : "text/plain";
+        const url = URL.createObjectURL(new Blob([typeof data === "string" ? data : JSON.stringify(data)], { type: `${type};charset=utf-8` }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 15e3);
+        return { ok: true, status: "saved" };
+      } catch (e) {
+        return { ok: false, code: "unavailable" };
+      }
+    }
     try {
       const c = window.claude;
       const dl = c && c.use ? await c.use("downloads") : null;
@@ -1350,6 +1368,19 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
     if (!dates.length) return { date: null, kg: state2.settings.startWeight };
     const d = dates[dates.length - 1];
     return { date: d, kg: num(state2.weights[d]) };
+  }
+  function weightTrend(state2, date) {
+    const avg = (from, to) => {
+      const v = [];
+      for (let i = from; i <= to; i++) {
+        const k = num(state2.weights[addDays(date, -i)]);
+        if (Number.isFinite(k)) v.push(k);
+      }
+      return v.length ? { m: sum(v) / v.length, n: v.length } : null;
+    };
+    const cur = avg(0, 6), prev = avg(7, 13);
+    if (!cur || cur.n < 3) return null;
+    return { avg: cur.m, n: cur.n, perWeek: prev && prev.n >= 3 ? cur.m - prev.m : null };
   }
   function weeklyAverages(state2) {
     const acc = {};
@@ -2002,6 +2033,69 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
     return { last, since, due: since >= BODY_EVERY_DAYS, next: addDays(last, BODY_EVERY_DAYS) };
   }
 
+  // src/lib/ics.js
+  var BYDAY = {
+    [ALARM_DAYS.all]: ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+    [ALARM_DAYS.std]: ["MO", "WE", "TH", "SA", "SU"],
+    [ALARM_DAYS.run]: ["TU", "FR"]
+  };
+  var DOW_CODE = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+  var esc = (t) => String(t).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  var d8 = (iso2) => iso2.replace(/-/g, "");
+  var hm = (t) => t.replace(":", "") + "00";
+  function fold(line) {
+    const enc = new TextEncoder();
+    if (enc.encode(line).length <= 75) return line;
+    const out = [];
+    let cur = "";
+    let size = 0;
+    for (const ch of line) {
+      const n = enc.encode(ch).length;
+      const limit = out.length === 0 ? 75 : 74;
+      if (size + n > limit) {
+        out.push(cur);
+        cur = "";
+        size = 0;
+      }
+      cur += ch;
+      size += n;
+    }
+    out.push(cur);
+    return out.join("\r\n ");
+  }
+  function buildIcs(times, now = /* @__PURE__ */ new Date()) {
+    const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+    const until = `${d8(TARGET_DATE)}T235959`;
+    const out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Cap 72 kg//FR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Cap 72 kg : alarmes"];
+    buildAlarms(times).forEach((a, i) => {
+      const days = BYDAY[a.days] || BYDAY[ALARM_DAYS.all];
+      let first = START_DATE;
+      while (!days.includes(DOW_CODE[dow(first)])) first = addDays(first, 1);
+      const [h, m] = a.t.split(":").map(Number);
+      const endMin = h * 60 + m + 10;
+      const end = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}${String(endMin % 60).padStart(2, "0")}00`;
+      out.push(
+        "BEGIN:VEVENT",
+        `UID:cap72-alarme-${i + 1}-${d8(START_DATE)}@cap72`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${d8(first)}T${hm(a.t)}`,
+        `DTEND:${d8(first)}T${end}`,
+        `RRULE:FREQ=WEEKLY;BYDAY=${days.join(",")};UNTIL=${until}`,
+        `SUMMARY:${esc(a.label)}`,
+        `DESCRIPTION:${esc(a.note)}`,
+        "TRANSP:TRANSPARENT",
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        `DESCRIPTION:${esc(a.label)}`,
+        "TRIGGER:PT0S",
+        "END:VALARM",
+        "END:VEVENT"
+      );
+    });
+    out.push("END:VCALENDAR");
+    return out.map(fold).join("\r\n") + "\r\n";
+  }
+
   // src/lib/goals.js
   var SEUIL_KCAL = 0.9;
   var SEUIL_PROT = 0.95;
@@ -2097,6 +2191,7 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
     const left = daysToTarget(date);
     const delta = kg - S.startWeight;
     const todayKg = state2.weights[date];
+    const trend = weightTrend(state2, date);
     const [draft, setDraft] = useState(todayKg ?? "");
     useEffect(() => {
       setDraft(todayKg ?? "");
@@ -2110,7 +2205,7 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
       A.setWeight(date, Math.round(x * 10) / 10);
       toast(`Pesée enregistrée : ${fmtNum(x)} kg`, "good");
     };
-    return /* @__PURE__ */ React.createElement(Card, { className: "overflow-hidden", pad: false }, /* @__PURE__ */ React.createElement("div", { className: "px-4 pt-4 pb-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-start justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lbl" }, "Poids à jeun"), /* @__PURE__ */ React.createElement("div", { className: "text-[13px] text-muted mt-0.5" }, lastDate ? `Dernière pesée : ${fmtShort(lastDate)}` : "Poids de départ, pas encore de pesée")), /* @__PURE__ */ React.createElement(Chip, { tone: "accent", icon: "Flag" }, left > 0 ? `J−${left}` : left === 0 ? "Jour J" : `J+${-left}`)), /* @__PURE__ */ React.createElement("div", { className: "relative mx-auto", style: { maxWidth: 300 } }, /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, className: "w-full block", role: "img", "aria-label": `Poids ${fmtNum(kg)} kilos sur un objectif de ${S.targetWeight}` }, /* @__PURE__ */ React.createElement("path", { d: `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${x1} ${y1}`, fill: "none", stroke: "rgb(var(--line))", strokeWidth: "14", strokeLinecap: "round" }), frac > 4e-3 && /* @__PURE__ */ React.createElement("path", { d: `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${px} ${py}`, fill: "none", stroke: "rgb(var(--accent))", strokeWidth: "14", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("line", { x1: ex0, y1: ey0, x2: ex1, y2: ey1, stroke: "rgb(var(--blue))", strokeWidth: "3", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("text", { x: x0, y: y0 + 16, textAnchor: "middle", fontSize: "12", fill: "rgb(var(--muted))", fontWeight: "600" }, S.startWeight), /* @__PURE__ */ React.createElement("text", { x: x1, y: y1 + 16, textAnchor: "middle", fontSize: "12", fill: "rgb(var(--muted))", fontWeight: "600" }, S.targetWeight)), /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 right-0 text-center", style: { top: "40%" } }, /* @__PURE__ */ React.createElement("div", { className: "text-[52px] leading-none font-bold tracking-tight" }, fmtNum(kg), /* @__PURE__ */ React.createElement("span", { className: "text-[18px] text-muted font-semibold ml-1" }, "kg")), /* @__PURE__ */ React.createElement("div", { className: "text-[13px] text-muted mt-1.5 num" }, delta >= 0 ? "+" : "−", fmtNum(Math.abs(delta)), " kg depuis le départ"))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-4 text-[12px] text-muted mt-1" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-3 h-[3px] rounded bg-accent" }), "Réel"), /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-[3px] h-3 rounded bg-blue" }), "Attendu ", date === todayISO() ? "aujourd’hui" : "ce jour-là", " : ", fmtNum(targetOnDate(S, date)), " kg"))), /* @__PURE__ */ React.createElement("div", { className: "hair px-4 py-3 flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-[13px] text-muted" }, week < 1 ? "Départ le lundi 30 novembre" : `Semaine ${clampWeek(week)}/${WEEKS}`), /* @__PURE__ */ React.createElement("div", { className: "text-[15px] font-semibold truncate" }, wInfo.name)), /* @__PURE__ */ React.createElement("div", { className: "w-[104px]" }, /* @__PURE__ */ React.createElement(NumInput, { value: draft, onChange: setDraft, placeholder: fmtNum(kg), suffix: "kg", ariaLabel: "Poids du jour à jeun" })), /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: save, "aria-label": "Enregistrer la pesée" }, todayKg != null ? "Modifier" : "Peser")));
+    return /* @__PURE__ */ React.createElement(Card, { className: "overflow-hidden", pad: false }, /* @__PURE__ */ React.createElement("div", { className: "px-4 pt-4 pb-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-start justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lbl" }, "Poids à jeun"), /* @__PURE__ */ React.createElement("div", { className: "text-[13px] text-muted mt-0.5" }, lastDate ? `Dernière pesée : ${fmtShort(lastDate)}` : "Poids de départ, pas encore de pesée")), /* @__PURE__ */ React.createElement(Chip, { tone: "accent", icon: "Flag" }, left > 0 ? `J−${left}` : left === 0 ? "Jour J" : `J+${-left}`)), /* @__PURE__ */ React.createElement("div", { className: "relative mx-auto", style: { maxWidth: 300 } }, /* @__PURE__ */ React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, className: "w-full block", role: "img", "aria-label": `Poids ${fmtNum(kg)} kilos sur un objectif de ${S.targetWeight}` }, /* @__PURE__ */ React.createElement("path", { d: `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${x1} ${y1}`, fill: "none", stroke: "rgb(var(--line))", strokeWidth: "14", strokeLinecap: "round" }), frac > 4e-3 && /* @__PURE__ */ React.createElement("path", { d: `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${px} ${py}`, fill: "none", stroke: "rgb(var(--accent))", strokeWidth: "14", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("line", { x1: ex0, y1: ey0, x2: ex1, y2: ey1, stroke: "rgb(var(--blue))", strokeWidth: "3", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement("text", { x: x0, y: y0 + 16, textAnchor: "middle", fontSize: "12", fill: "rgb(var(--muted))", fontWeight: "600" }, S.startWeight), /* @__PURE__ */ React.createElement("text", { x: x1, y: y1 + 16, textAnchor: "middle", fontSize: "12", fill: "rgb(var(--muted))", fontWeight: "600" }, S.targetWeight)), /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 right-0 text-center", style: { top: "40%" } }, /* @__PURE__ */ React.createElement("div", { className: "text-[52px] leading-none font-bold tracking-tight" }, fmtNum(kg), /* @__PURE__ */ React.createElement("span", { className: "text-[18px] text-muted font-semibold ml-1" }, "kg")), /* @__PURE__ */ React.createElement("div", { className: "text-[13px] text-muted mt-1.5 num" }, delta >= 0 ? "+" : "−", fmtNum(Math.abs(delta)), " kg depuis le départ"))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-4 text-[12px] text-muted mt-1" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-3 h-[3px] rounded bg-accent" }), "Réel"), /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-block w-[3px] h-3 rounded bg-blue" }), "Attendu ", date === todayISO() ? "aujourd’hui" : "ce jour-là", " : ", fmtNum(targetOnDate(S, date)), " kg"))), /* @__PURE__ */ React.createElement("div", { className: "hair px-4 py-3 flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-[13px] text-muted" }, week < 1 ? "Départ le lundi 30 novembre" : `Semaine ${clampWeek(week)}/${WEEKS}`), /* @__PURE__ */ React.createElement("div", { className: "text-[15px] font-semibold truncate" }, wInfo.name), trend && /* @__PURE__ */ React.createElement("div", { className: "text-[12px] text-muted num mt-0.5", "aria-label": "Tendance sur 7 jours" }, "Tendance 7 j : ", /* @__PURE__ */ React.createElement("b", { className: "text-text" }, fmtNum(trend.avg), " kg"), trend.perWeek != null && /* @__PURE__ */ React.createElement("span", { className: trend.perWeek < 0 ? "text-warn" : trend.perWeek > 0.5 ? "text-warn" : "text-good" }, " (", trend.perWeek >= 0 ? "+" : "−", fmtNum(Math.abs(trend.perWeek), 2), "/sem.)"))), /* @__PURE__ */ React.createElement("div", { className: "w-[104px]" }, /* @__PURE__ */ React.createElement(NumInput, { value: draft, onChange: setDraft, placeholder: fmtNum(kg), suffix: "kg", ariaLabel: "Poids du jour à jeun" })), /* @__PURE__ */ React.createElement(Btn, { variant: "primary", onClick: save, "aria-label": "Enregistrer la pesée" }, todayKg != null ? "Modifier" : "Peser")));
   }
   function TodayPlan({ state: state2, date, go }) {
     const isToday = date === todayISO();
@@ -2516,6 +2611,31 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
       onClose();
     } }, "Ajouter un shake à ma journée"));
   }
+  function RemindersCard({ state: state2, date }) {
+    const [note, setNote] = useState("");
+    if (date !== todayISO() || state2.flags?.reminders) return null;
+    const exportIcs = async () => {
+      const r = await saveFile("cap72-alarmes.ics", buildIcs(state2.settings.times));
+      if (r.ok) {
+        A.setFlag("reminders", "exported");
+        toast("Ouvre le fichier pour l’ajouter à Calendrier", "good");
+      } else if (r.code === "declined") toast("Téléchargement annulé");
+      else setNote("Le téléchargement n’est pas disponible ici : onglet Nutrition → Alarmes, crée les alarmes à la main dans Horloge.");
+    };
+    return /* @__PURE__ */ React.createElement(Card, { title: "Rappels de repas", icon: "BellRing" }, /* @__PURE__ */ React.createElement("div", { className: "text-[14px] leading-snug" }, "Tu oublies tes repas : fais-toi notifier. Un fichier ajoute au Calendrier de ton iPhone une notification à chaque repas et au shake, jusqu’au 4 avril."), /* @__PURE__ */ React.createElement("div", { className: "text-[12.5px] text-muted leading-snug mt-1.5" }, "Le fichier se télécharge, puis tu l’ouvres et tu touches « Ajouter tout » dans Calendrier. Il suit les horaires de tes réglages. Une notification respecte le mode silencieux : pour un vrai réveil, garde Horloge."), /* @__PURE__ */ React.createElement(Btn, { variant: "primary", className: "w-full mt-3", icon: "CalendarPlus", onClick: exportIcs }, "Ajouter les rappels au Calendrier"), note && /* @__PURE__ */ React.createElement("div", { className: "mt-2 text-[13px] text-warn leading-snug", role: "status" }, note), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => A.setFlag("reminders", "skip"), className: "mt-2.5 w-full text-center text-[13px] text-muted underline decoration-dotted underline-offset-2 min-h-[36px]" }, "J’ai déjà mes alarmes, ne plus afficher"));
+  }
+  function TomorrowCard({ state: state2, date }) {
+    const now = useNow(6e4);
+    if (date !== todayISO() || new Date(now).getHours() < 19) return null;
+    const tm = addDays(date, 1);
+    const sch = scheduleOn(state2, tm);
+    const T2 = targetsFor(state2, tm);
+    const d = dow(tm);
+    const place = d === 1 || d === 2 ? "IUT" : d >= 3 && d <= 5 ? "entreprise" : null;
+    const plan = !sch ? "À définir" : sch.type === "gym" ? `Muscu · ${SESSIONS[sch.id]?.name || ""}` : sch.type === "run" ? `Course ${sch.id}` : sch.label;
+    const meals = DAY_TYPES[dayTypeFor(state2, tm)].meals;
+    return /* @__PURE__ */ React.createElement(Card, { title: `Demain · ${fmtLong(tm)}`, icon: "CalendarClock" }, /* @__PURE__ */ React.createElement("div", { className: "grid gap-1.5 text-[14px] leading-snug" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-muted" }, "Au programme"), /* @__PURE__ */ React.createElement("b", { className: "text-right" }, plan, sch?.where ? ` (${sch.where})` : "")), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-muted" }, "Petit-déjeuner"), /* @__PURE__ */ React.createElement("b", null, mealTime(state2, tm, "bkf"))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-muted" }, "Cible"), /* @__PURE__ */ React.createElement("b", { className: "num" }, fmtK(T2.kcal), " kcal · ", meals.length, " repas"))), /* @__PURE__ */ React.createElement("div", { className: "mt-3 rounded-xl bg-raised border border-line px-3 py-2 text-[13px] leading-snug text-muted" }, place ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("b", { className: "text-text" }, "Journée ", place === "IUT" ? "à l’IUT" : "en entreprise", " :"), " mets le déjeuner et le shake dans ton sac ce soir. Un repas oublié coûte plus cher qu’une minute de préparation.") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("b", { className: "text-text" }, "Journée à la maison :"), " pas d’excuse pour sauter un repas, et le frigo est à côté."), " ", "Règle ton heure de réveil demain matin pour que l’heure du petit-déjeuner s’ajuste."));
+  }
   function GoalsCard({ state: state2, date }) {
     const today = todayISO();
     const G = weekGoals(state2, date, today);
@@ -2605,7 +2725,7 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
     const [rescue, setRescue] = useState(false);
     const [editId, setEditId] = useState(null);
     const [supps, setSupps] = useState(false);
-    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(NightBanner, { back, setBack }), /* @__PURE__ */ React.createElement(DayNav, { date, back, setBack }), /* @__PURE__ */ React.createElement(NowCard, { state: state2, date, go }), /* @__PURE__ */ React.createElement(WeightHero, { state: state2, date }), /* @__PURE__ */ React.createElement(DayFlow, { state: state2, date }), /* @__PURE__ */ React.createElement(RemainingCard, { state: state2, date, onQuick: () => setQuick(true) }), /* @__PURE__ */ React.createElement(MorningCard, { state: state2, date, onEdit: setEditId, onSupps: () => setSupps(true) }), /* @__PURE__ */ React.createElement(MiddayCard, { state: state2, date, onEdit: setEditId }), /* @__PURE__ */ React.createElement("div", { id: "flow-session", style: { scrollMarginTop: 72 } }, /* @__PURE__ */ React.createElement(TodayPlan, { state: state2, date, go })), /* @__PURE__ */ React.createElement(EveningCard, { state: state2, date, onEdit: setEditId, onRescue: () => setRescue(true), onQuick: () => setQuick(true) }), /* @__PURE__ */ React.createElement("div", { id: "flow-steps", style: { scrollMarginTop: 72 } }, /* @__PURE__ */ React.createElement(PacerioCard, { state: state2, date })), date === today && dow(date) === 0 && /* @__PURE__ */ React.createElement(SundayCard, { go, state: state2 }), /* @__PURE__ */ React.createElement(GoalsCard, { state: state2, date }), /* @__PURE__ */ React.createElement(CheckinCard, { state: state2, date }), /* @__PURE__ */ React.createElement(SuppManager, { state: state2, open: supps, onClose: () => setSupps(false) }), /* @__PURE__ */ React.createElement(QuickAddModal, { open: quick, onClose: () => setQuick(false), date }), /* @__PURE__ */ React.createElement(RescueModal, { open: rescue, onClose: () => setRescue(false), date }), editId && /* @__PURE__ */ React.createElement(MealEditModal, { key: `${date}-${editId}`, state: state2, date, id: editId, onClose: () => setEditId(null) }));
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(NightBanner, { back, setBack }), /* @__PURE__ */ React.createElement(DayNav, { date, back, setBack }), /* @__PURE__ */ React.createElement(NowCard, { state: state2, date, go }), /* @__PURE__ */ React.createElement(RemindersCard, { state: state2, date }), /* @__PURE__ */ React.createElement(WeightHero, { state: state2, date }), /* @__PURE__ */ React.createElement(DayFlow, { state: state2, date }), /* @__PURE__ */ React.createElement(RemainingCard, { state: state2, date, onQuick: () => setQuick(true) }), /* @__PURE__ */ React.createElement(MorningCard, { state: state2, date, onEdit: setEditId, onSupps: () => setSupps(true) }), /* @__PURE__ */ React.createElement(MiddayCard, { state: state2, date, onEdit: setEditId }), /* @__PURE__ */ React.createElement("div", { id: "flow-session", style: { scrollMarginTop: 72 } }, /* @__PURE__ */ React.createElement(TodayPlan, { state: state2, date, go })), /* @__PURE__ */ React.createElement(EveningCard, { state: state2, date, onEdit: setEditId, onRescue: () => setRescue(true), onQuick: () => setQuick(true) }), /* @__PURE__ */ React.createElement("div", { id: "flow-steps", style: { scrollMarginTop: 72 } }, /* @__PURE__ */ React.createElement(PacerioCard, { state: state2, date })), date === today && dow(date) === 0 && /* @__PURE__ */ React.createElement(SundayCard, { go, state: state2 }), /* @__PURE__ */ React.createElement(TomorrowCard, { state: state2, date }), /* @__PURE__ */ React.createElement(GoalsCard, { state: state2, date }), /* @__PURE__ */ React.createElement(CheckinCard, { state: state2, date }), /* @__PURE__ */ React.createElement(SuppManager, { state: state2, open: supps, onClose: () => setSupps(false) }), /* @__PURE__ */ React.createElement(QuickAddModal, { open: quick, onClose: () => setQuick(false), date }), /* @__PURE__ */ React.createElement(RescueModal, { open: rescue, onClose: () => setRescue(false), date }), editId && /* @__PURE__ */ React.createElement(MealEditModal, { key: `${date}-${editId}`, state: state2, date, id: editId, onClose: () => setEditId(null) }));
   }
 
   // src/tabs/Training.jsx
@@ -3088,69 +3208,6 @@ if (!(window.React && window.ReactDOM && window.Recharts && window.PropTypes)) {
     const rows = state2.budget.expenses.map((e, i) => ({ ...e, i })).sort((a, b) => a.date === b.date ? a.i - b.i : a.date < b.date ? -1 : 1);
     const euros = (v) => String(Number.isFinite(price(v)) ? price(v) : 0).replace(".", ",");
     return ["Date;Libellé;Catégorie;Montant (€)", ...rows.map((e) => [e.date, esc2(e.label), esc2(e.cat), euros(e.amount)].join(";"))].join("\r\n");
-  }
-
-  // src/lib/ics.js
-  var BYDAY = {
-    [ALARM_DAYS.all]: ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
-    [ALARM_DAYS.std]: ["MO", "WE", "TH", "SA", "SU"],
-    [ALARM_DAYS.run]: ["TU", "FR"]
-  };
-  var DOW_CODE = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
-  var esc = (t) => String(t).replace(/\\/g, "\\\\").replace(/;/g, ";").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
-  var d8 = (iso2) => iso2.replace(/-/g, "");
-  var hm = (t) => t.replace(":", "") + "00";
-  function fold(line) {
-    const enc = new TextEncoder();
-    if (enc.encode(line).length <= 75) return line;
-    const out = [];
-    let cur = "";
-    let size = 0;
-    for (const ch of line) {
-      const n = enc.encode(ch).length;
-      const limit = out.length === 0 ? 75 : 74;
-      if (size + n > limit) {
-        out.push(cur);
-        cur = "";
-        size = 0;
-      }
-      cur += ch;
-      size += n;
-    }
-    out.push(cur);
-    return out.join("\r\n ");
-  }
-  function buildIcs(times, now = /* @__PURE__ */ new Date()) {
-    const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-    const until = `${d8(TARGET_DATE)}T235959`;
-    const out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Cap 72 kg//FR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Cap 72 kg : alarmes"];
-    buildAlarms(times).forEach((a, i) => {
-      const days = BYDAY[a.days] || BYDAY[ALARM_DAYS.all];
-      let first = START_DATE;
-      while (!days.includes(DOW_CODE[dow(first)])) first = addDays(first, 1);
-      const [h, m] = a.t.split(":").map(Number);
-      const endMin = h * 60 + m + 10;
-      const end = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}${String(endMin % 60).padStart(2, "0")}00`;
-      out.push(
-        "BEGIN:VEVENT",
-        `UID:cap72-alarme-${i + 1}-${d8(START_DATE)}@cap72`,
-        `DTSTAMP:${stamp}`,
-        `DTSTART:${d8(first)}T${hm(a.t)}`,
-        `DTEND:${d8(first)}T${end}`,
-        `RRULE:FREQ=WEEKLY;BYDAY=${days.join(",")};UNTIL=${until}`,
-        `SUMMARY:${esc(a.label)}`,
-        `DESCRIPTION:${esc(a.note)}`,
-        "TRANSP:TRANSPARENT",
-        "BEGIN:VALARM",
-        "ACTION:DISPLAY",
-        `DESCRIPTION:${esc(a.label)}`,
-        "TRIGGER:PT0S",
-        "END:VALARM",
-        "END:VEVENT"
-      );
-    });
-    out.push("END:VCALENDAR");
-    return out.map(fold).join("\r\n") + "\r\n";
   }
 
   // src/tabs/Nutrition.jsx
