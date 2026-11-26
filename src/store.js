@@ -7,7 +7,7 @@ const LS_UI = 'cap72.ui';
 const COLLECTION = 'cap72';
 
 export const defaultSettings = () => ({
-  startWeight: 65, targetWeight: 72, heightCm: 174,
+  startWeight: 65, targetWeight: 72, heightCm: 175,
   baseKcal: 3100, runBonus: 500, protein: 135, fat: 85, carbMin: 420, water: 3000,
   refMode: 'auto', refActive: 600,
   pace: '6:30',
