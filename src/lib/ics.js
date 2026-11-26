@@ -10,7 +10,7 @@ const BYDAY = {
 };
 const DOW_CODE = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 
-const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 const d8 = (iso) => iso.replace(/-/g, '');
 const hm = (t) => t.replace(':', '') + '00';
 
