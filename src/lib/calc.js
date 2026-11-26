@@ -1,6 +1,6 @@
-import { MEALS, DAY_TYPES } from '../data/nutrition.js';
+import { MEALS, DAY_TYPES, RAMP, mealFor, variantsFor, rampFactor, rampDeficit } from '../data/nutrition.js';
 import { START_DATE, WEEKS, planForDow, KEY_LIFTS, parseRange, RUN_PLAN } from '../data/program.js';
-import { dow, weekIndex, weekStart, weekEnd, addDays, diffDays, fmtNum, todayISO } from './dates.js';
+import { dow, toMin, weekIndex, weekStart, weekEnd, addDays, diffDays, fmtNum, todayISO } from './dates.js';
 
 export const num = (v) => {
   if (v === '' || v == null) return NaN;
@@ -73,7 +73,7 @@ export function coach(state, today = todayISO()) {
   // une semaine ne compte que si elle a au moins 3 pesées : une pesée isolée ne doit pas piloter les calories
   const wk = weeklyAverages(state).filter((w) => w.count >= 3);
   if (wk.length < 2) {
-    return { level: 'info', title: 'Pèse-toi chaque matin à jeun', text: `Il faut deux semaines de pesées (au moins 3 par semaine) pour piloter les calories. D’ici là, suis le plan à ${S.baseKcal.toLocaleString('fr-FR')} kcal sans rien changer.`, rate: null, projection: null };
+    return { level: 'info', title: 'Pèse-toi chaque matin à jeun', text: `Il faut deux semaines de pesées (au moins 3 par semaine) pour piloter les calories. D’ici là, suis le plan du jour sans rien changer : la dose du shake monte toute seule, de semaine en semaine.`, rate: null, projection: null };
   }
   const delta = (a, b) => (b.avg - a.avg) / (b.n - a.n);
   const last = wk[wk.length - 1];
@@ -89,6 +89,10 @@ export function coach(state, today = todayISO()) {
   else if (r1 < 0.25 && r2 !== null && r2 < 0.25) res = { level: 'serious', title: 'Trop lent depuis 2 semaines', text: `+${rate} kg puis +${fmtNum(r2, 2)} kg : ajoute 150 à 200 kcal par jour (ex. 250 ml de lait entier en plus, ≈ 160 kcal). Réévalue dans 2 semaines.` };
   else if (r1 < 0.2) res = { level: 'warning', title: 'Un peu lent cette semaine', text: `+${rate} kg. Surveille une semaine de plus : si c’est encore sous 0,25 kg, on ajoute 150–200 kcal par jour.` };
   else res = { level: 'good', title: 'Zone verte', text: `+${rate} kg cette semaine (zone visée : 0,20 à 0,50 kg). Ne change rien.` };
+  // pendant la montée en charge, un rythme encore lent est normal : on ne corrige pas les calories avant la dose pleine
+  if (rampFactor(last.n) < 1 && r1 >= 0 && r1 <= 0.5 && res.level !== 'good') {
+    res = { level: 'info', title: 'Montée en charge en cours', text: `+${rate} kg cette semaine. Le shake n’est pas encore à dose pleine (${Math.round(rampFactor(last.n) * 100)} %) : ce rythme est normal, on juge les calories à partir de la semaine ${RAMP.length + 1}.` };
+  }
   return { ...res, rate: r1, projection };
 }
 
@@ -194,8 +198,9 @@ export function targetsFor(state, date) {
     src = 'plan';
     note = 'bonus prévu pour un jour de course';
   }
-  const kcal = S.baseKcal + bonus;
-  return { kcal, p: S.protein, f: S.fat, c: S.carbMin + Math.round((bonus * 0.75) / 4), bonus, src, note, ref, active: act };
+  const ramp = rampDeficit(weekIndex(date));
+  const kcal = S.baseKcal - ramp + bonus;
+  return { kcal, base: S.baseKcal - ramp, ramp, p: S.protein, f: S.fat, c: S.carbMin - Math.round((ramp * 0.8) / 4) + Math.round((bonus * 0.75) / 4), bonus, src, note, ref, active: act };
 }
 
 // ───────────── Repas : valeurs du plan ou valeurs saisies ─────────────
@@ -212,14 +217,31 @@ export function scaleMacros(plan, k) {
   const f = plan.k > 0 ? k / plan.k : 1;
   return { k: Math.round(k), p: Math.round(plan.p * f), c: Math.round(plan.c * f), f: Math.round(plan.f * f) };
 }
-export const mealMacros = (state, date, id) => state.days[date]?.mealEdits?.[id] || MEALS[id].macros;
+/** Heure d'un repas : le petit-déjeuner suit le réveil noté (réveil + 30 min), les autres suivent les horaires réglés. */
+export function mealTime(state, date, id) {
+  const w = state.days[date]?.wake;
+  if (id === 'bkf' && /^\d{1,2}:\d{2}$/.test(w || '')) {
+    const m = (toMin(w) + 30) % 1440;
+    return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  }
+  return state.settings.times[dayTypeFor(state, date)][id];
+}
+export const suppOn = (d, id) => (id === 'creatine' ? !!d.creatine : !!d.supp?.[id]);
+/** Options de composition d’un jour : semaine du programme, whey dans le shake, variantes choisies. */
+export const planOpts = (state, date) => ({ week: weekIndex(date), whey: state.settings.wheyOn !== false, variants: variantsFor(state.settings, weekIndex(date)) });
+/** Le repas tel qu’il a été (ou sera) servi ce jour-là : la variante cochée ce jour-là prime sur le choix du moment. */
+export function mealAt(state, date, id) {
+  const o = planOpts(state, date);
+  return mealFor(id, { ...o, variant: state.days[date]?.mealVar?.[id] || o.variants[id] });
+}
+export const mealMacros = (state, date, id) => state.days[date]?.mealEdits?.[id] || mealAt(state, date, id).macros;
 
 export function consumedFor(state, date) {
   const d = state.days[date] || {};
   const type = dayTypeFor(state, date);
   let k = 0, p = 0, c = 0, f = 0;
   for (const id of DAY_TYPES[type].meals) {
-    if (d.meals?.[id]) { const m = d.mealEdits?.[id] || MEALS[id].macros; k += m.k; p += m.p; c += m.c; f += m.f; }
+    if (d.meals?.[id]) { const m = mealMacros(state, date, id); k += m.k; p += m.p; c += m.c; f += m.f; }
   }
   for (const e of d.extras || []) { k += e.k; p += e.p; c += e.c; f += e.f; }
   return { k, p, c, f };

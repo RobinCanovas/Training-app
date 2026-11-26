@@ -39,6 +39,78 @@ for (const d of Object.values(DAY_TYPES)) {
   d.macros = macrosOf(d.items);
 }
 
+// ───────────── Montée en charge : le shake monte par paliers ─────────────
+// Le shake (≈ 800 kcal) est le seul repas « réglable » : on le dose à 50 % la semaine 1, puis +10 points par semaine jusqu’à la dose pleine (semaine 6).
+// La whey reste entière pour garder les protéines ; le reste (lait, avoine, banane, beurre de cacahuète, miel) suit le palier.
+export const RAMP = [0.5, 0.6, 0.7, 0.8, 0.9];
+export const rampFactor = (week) => (!(week >= 1) ? RAMP[0] : week > RAMP.length ? 1 : RAMP[week - 1]);
+const roundQ = (id, q) => (id === 'milk' || id === 'oj' ? Math.max(50, Math.round(q / 10) * 10) : Math.max(5, Math.round(q / 5) * 5));
+
+// ───────────── Variantes (onglet « Varier ») : même ordre de grandeur en calories et en protéines que le repas de base ─────────────
+export const VARIANTS = {
+  bkf: [
+    { id: 'bkf', title: MEALS.bkf.title, tag: 'Chaud · 3 min', items: MEALS.bkf.items, how: MEALS.bkf.how },
+    { id: 'bkf_oats', title: 'Overnight oats skyr', tag: 'Prépa la veille', items: [['oats', 90], ['milk', 200], ['skyr', 120], ['banana', 120], ['honey', 20], ['nuts', 15]], how: 'La veille : avoine, lait, skyr et miel dans un bocal, au frigo. Au matin : banane en rondelles et noix concassées. Zéro cuisine.' },
+    { id: 'bkf_tartines', title: 'Tartines œuf – avocat', tag: 'Salé · 7 min', items: [['bread', 90], ['egg', 110], ['avocado', 60], ['milk', 250], ['honey', 15], ['banana', 120]], how: 'Œufs brouillés ou au plat, tartines grillées avec l’avocat écrasé. Un verre de lait, la banane avec le miel pour finir.' },
+    { id: 'bkf_skyr', title: 'Bol skyr – avoine', tag: 'Sans cuisson · 2 min', items: [['skyr', 200], ['oats', 70], ['banana', 120], ['honey', 20], ['nuts', 15], ['milk', 200]], how: 'Skyr et avoine dans un bol, banane, miel, noix. Un verre de lait à côté.' },
+  ],
+  lunch: [
+    { id: 'lunch', title: MEALS.lunch.title, tag: 'Batch cooking', items: MEALS.lunch.items, how: MEALS.lunch.how },
+    { id: 'lunch_pasta', title: 'Pâtes – poulet – tomate', tag: 'Batch cooking', items: [['pasta', 110], ['chicken', 120], ['tomato', 150], ['cheese', 10], ['oil', 10], ['oj', 250]], how: 'Pâtes 10 min, poulet en dés à la poêle, coulis réchauffé, fromage râpé. Se prépare en 3 portions.' },
+    { id: 'lunch_wrap', title: 'Wraps thon – avocat', tag: 'Sans cuisson', items: [['wrap', 124], ['tuna', 112], ['avocado', 80], ['cheese', 20], ['oj', 250]], how: 'Avocat écrasé sur les wraps, thon égoutté, fromage, on roule serré. Se mange en marchant.' },
+    { id: 'lunch_riceegg', title: 'Riz – œufs – légumes', tag: 'Rapide · 10 min', items: [['rice', 110], ['egg', 110], ['veg', 150], ['oil', 5], ['avocado', 40], ['oj', 250]], how: 'Riz cuit, œufs brouillés, légumes poêlés, avocat en tranches. Le plan B quand le batch cooking est fini.' },
+  ],
+  dinner: [
+    { id: 'dinner', title: MEALS.dinner.title, tag: 'Express · 15 min', items: MEALS.dinner.items, how: MEALS.dinner.how },
+    { id: 'dinner_rice_beef', title: 'Riz – bœuf – légumes', tag: 'Express · 15 min', items: [['rice', 100], ['beef5', 110], ['veg', 150], ['oil', 8], ['cheese', 10], ['bread', 30]], how: 'Riz 10 min, bœuf haché poêlé 5 min, légumes surgelés, un filet d’huile et du fromage râpé. Un morceau de pain à côté.' },
+    { id: 'dinner_tuna', title: 'Pâtes thon – tomate', tag: 'Sans viande · 12 min', items: [['pasta', 120], ['tuna', 112], ['tomato', 150], ['cheese', 15], ['oil', 8]], how: 'Pâtes 10 min, coulis et thon égoutté réchauffés ensemble, fromage et filet d’huile.' },
+    { id: 'dinner_omelette', title: 'Omelette – pain – avocat', tag: 'Léger à cuisiner · 10 min', items: [['egg', 165], ['bread', 100], ['avocado', 60], ['cheese', 15], ['skyr', 100], ['honey', 10]], how: 'Omelette au fromage, pain et avocat. Dessert : skyr avec le miel.' },
+  ],
+};
+for (const list of Object.values(VARIANTS)) for (const v of list) v.macros = macrosOf(v.items);
+export const VARIED = ['bkf', 'lunch', 'dinner'];
+/** Variante servie pour chaque repas variable, une semaine donnée : choix manuel, ou rotation automatique (décalée d’un repas à l’autre). */
+export function variantsFor(settings, week) {
+  const w = week >= 1 ? week : 1;
+  const out = {};
+  VARIED.forEach((id, k) => {
+    const list = VARIANTS[id];
+    if (settings?.rotate) out[id] = list[(w - 1 + k) % list.length].id;
+    else out[id] = list.some((v) => v.id === settings?.variants?.[id]) ? settings.variants[id] : list[0].id;
+  });
+  return out;
+}
+
+/**
+ * Un repas tel qu’il est servi : variante choisie, shake dosé selon la semaine, whey ou pas.
+ * o = { variant, week, whey }
+ */
+export function mealFor(id, o = {}) {
+  const base = MEALS[id];
+  const list = VARIANTS[id];
+  const v = (list && list.find((x) => x.id === o.variant)) || (list && list[0]) || base;
+  let items = v.items;
+  if (id === 'shake') {
+    const f = rampFactor(o.week);
+    items = items.filter(([i]) => o.whey !== false || i !== 'whey')
+      .map(([i, q]) => (i === 'whey' || f === 1 ? [i, q] : [i, roundQ(i, q * f)]));
+  }
+  return { ...base, title: v.title || base.title, how: v.how || base.how, tag: v.tag, items, macros: macrosOf(items), variantId: v.id || id };
+}
+
+/** Les repas d’un type de jour : { items, macros } avec les mêmes options que mealFor (o.variants = { bkf, lunch, dinner }). */
+export function dayPlan(type, o = {}) {
+  const meals = DAY_TYPES[type].meals.map((id) => mealFor(id, { ...o, variant: o.variants?.[id] }));
+  const items = meals.flatMap((m) => m.items);
+  return { meals, items, macros: macrosOf(items) };
+}
+
+// Calories retirées du jour de base pendant la montée (shake à dose réduite)
+export const rampDeficit = (week) => {
+  const full = MEALS.shake.macros.k;
+  return Math.round(full - mealFor('shake', { week }).macros.k);
+};
+
 // Horaires par défaut (modifiables dans les réglages). Jour de course : shake avancé, collation à 17:30.
 export const DEFAULT_TIMES = {
   std: { bkf: '07:30', lunch: '12:30', shake: '16:30', dinner: '19:45' },
@@ -140,13 +212,15 @@ export const RESCUE = [
 ];
 
 // ───────────── Liste de courses : agrège les repas de la semaine ─────────────
-export function weeklyShopping({ stdDays, runDays, margin }) {
+export function weeklyShopping({ stdDays, runDays, margin, week, variants, whey, extra }) {
   const need = {};
   const add = (items, times) => {
     for (const [id, q] of items) need[id] = (need[id] || 0) + q * times;
   };
-  add(DAY_TYPES.std.items, stdDays);
-  add(DAY_TYPES.run.items, runDays);
+  const o = { week, variants, whey };
+  add(dayPlan('std', o).items, stdDays);
+  add(dayPlan('run', o).items, runDays);
+  if (extra) add(extra, 1);
   const k = margin ? 1.1 : 1;
   const lines = Object.entries(need).map(([id, q]) => {
     const F = FOODS[id];

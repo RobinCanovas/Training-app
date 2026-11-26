@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_TIMES } from './data/nutrition.js';
-import { monthKey } from './lib/dates.js';
+import { DEFAULT_TIMES, variantsFor } from './data/nutrition.js';
+import { monthKey, weekIndex } from './lib/dates.js';
 
 const LS_KEY = 'cap72.v1';
 const LS_UI = 'cap72.ui';
@@ -11,6 +11,7 @@ export const defaultSettings = () => ({
   baseKcal: 3100, runBonus: 500, protein: 135, fat: 85, carbMin: 420, water: 3000,
   refMode: 'auto', refActive: 600,
   pace: '6:30',
+  wheyOn: true, rotate: false, variants: {},
   times: JSON.parse(JSON.stringify(DEFAULT_TIMES)),
 });
 
@@ -31,6 +32,7 @@ export const defaultState = () => ({
   days: {},      // 'YYYY-MM-DD' → { meals:{id:true}, mealEdits:{id:{k,p,c,f,est}}, creatine, water, extras:[], pacerio:{steps,kcal,src}, checkin:{sleep,energy,note}, skipGym }
   gym: {},       // 'YYYY-MM-DD' → { s:'bas', ex:{ exId:[{kg,reps,done}] }, note }
   runs: {},      // 'YYYY-MM-DD' → { id:'A'|'B', km, sec, rpe, hr, hrMax, elev, kcal, cad, note }
+  supps: [{ id: 'creatine', name: 'Créatine monohydrate', dose: '5 g', price: '', weeks: '' }], // compléments suivis chaque jour
   equip: {},     // id → true
   shop: {},      // 'S<n>' → { id: true }
   blood: { t0Date: '', t12Date: '', v: {}, notes: '' },
@@ -48,7 +50,7 @@ function mergeDefaults(raw) {
   const s = raw && typeof raw === 'object' ? raw : {};
   return {
     ...d, ...s,
-    settings: { ...d.settings, ...(s.settings || {}), times: { std: { ...d.settings.times.std, ...(s.settings?.times?.std || {}) }, run: { ...d.settings.times.run, ...(s.settings?.times?.run || {}) } } },
+    settings: { ...d.settings, ...(s.settings || {}), variants: { ...(s.settings?.variants && typeof s.settings.variants === 'object' ? s.settings.variants : {}) }, times: { std: { ...d.settings.times.std, ...(s.settings?.times?.std || {}) }, run: { ...d.settings.times.run, ...(s.settings?.times?.run || {}) } } },
     blood: { ...d.blood, ...(s.blood || {}), v: { ...(s.blood?.v || {}) } },
     body: { ...(s.body && typeof s.body === 'object' ? s.body : {}) },
     budget: {
@@ -58,6 +60,7 @@ function mergeDefaults(raw) {
       expenses: Array.isArray(s.budget?.expenses) ? s.budget.expenses : [],
     },
     flags: { ...(s.flags && typeof s.flags === 'object' ? s.flags : {}) },
+    supps: Array.isArray(s.supps) ? s.supps.filter((x) => x && x.id && x.name) : d.supps,
   };
 }
 
@@ -128,15 +131,29 @@ const patchAt = (path, patch) => update((s) => {
 });
 
 // ───────────── Actions ─────────────
+function A_tick(s, date, id, on) {
+  const v = on ? variantsFor(s.settings, weekIndex(date))[id] : undefined;
+  let n = setIn(s, ['days', date, 'meals', id], on ? true : undefined);
+  n = setIn(n, ['days', date, 'mealVar', id], v);
+  return n;
+}
+
 export const A = {
   setSettings: (patch) => patchAt(['settings'], patch),
   setTime: (type, id, value) => put(['settings', 'times', type, id], value),
   setWeight: (date, kg) => put(['weights', date], kg === '' || kg == null ? undefined : kg),
   patchDay: (date, patch) => patchAt(['days', date], patch),
-  toggleMeal: (date, id) => update((s) => setIn(s, ['days', date, 'meals', id], s.days[date]?.meals?.[id] ? undefined : true)),
-  setMeal: (date, id, on) => put(['days', date, 'meals', id], on ? true : undefined),
+  // on garde la variante servie ce jour-là : changer de menu plus tard ne réécrit pas l'historique
+  toggleMeal: (date, id) => update((s) => A_tick(s, date, id, !s.days[date]?.meals?.[id])),
+  setMeal: (date, id, on) => update((s) => A_tick(s, date, id, !!on)),
   setWater: (date, ml) => put(['days', date, 'water'], Math.max(0, ml)),
   toggleCreatine: (date) => update((s) => setIn(s, ['days', date, 'creatine'], s.days[date]?.creatine ? undefined : true)),
+  toggleSupp: (date, id) => update((s) => (id === 'creatine' ? setIn(s, ['days', date, 'creatine'], s.days[date]?.creatine ? undefined : true) : setIn(s, ['days', date, 'supp', id], s.days[date]?.supp?.[id] ? undefined : true))),
+  setWake: (date, hhmm) => put(['days', date, 'wake'], hhmm || undefined),
+  setVariant: (meal, id) => put(['settings', 'variants', meal], id),
+  addSupp: (x) => update((s) => setIn(s, ['supps'], [...s.supps, { id: `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, price: '', weeks: '', ...x }])),
+  updateSupp: (id, patch) => update((s) => setIn(s, ['supps'], s.supps.map((x) => (x.id === id ? { ...x, ...patch } : x)))),
+  removeSupp: (id) => update((s) => setIn(s, ['supps'], s.supps.filter((x) => x.id !== id))),
   addExtra: (date, extra) => update((s) => setIn(s, ['days', date, 'extras'], [...(s.days[date]?.extras || []), extra])),
   removeExtra: (date, i) => update((s) => setIn(s, ['days', date, 'extras'], (s.days[date]?.extras || []).filter((_, j) => j !== i))),
   setPacerio: (date, p) => put(['days', date, 'pacerio'], p),
@@ -187,8 +204,8 @@ export const A = {
 
 // ───────────── Export / import ─────────────
 export function exportPayload() {
-  const { settings, weights, days, gym, runs, equip, shop, blood, body, budget, flags } = state;
-  return { app: 'cap72', v: 1, exportedAt: new Date().toISOString(), data: { settings, weights, days, gym, runs, equip, shop, blood, body, budget, flags } };
+  const { settings, weights, days, gym, runs, equip, shop, blood, body, budget, flags, supps } = state;
+  return { app: 'cap72', v: 1, exportedAt: new Date().toISOString(), data: { settings, weights, days, gym, runs, equip, shop, blood, body, budget, flags, supps } };
 }
 export const exportText = () => JSON.stringify(exportPayload(), null, 1);
 
@@ -240,7 +257,7 @@ let wipe = false;                 // après import / réinitialisation : supprim
 const knownRemote = new Set();
 
 export function shardsOf(s) {
-  const out = { core: { settings: s.settings, weights: s.weights, runs: s.runs, equip: s.equip, shop: s.shop, blood: s.blood, body: s.body, budget: s.budget, flags: s.flags } };
+  const out = { core: { settings: s.settings, weights: s.weights, runs: s.runs, equip: s.equip, shop: s.shop, blood: s.blood, body: s.body, budget: s.budget, flags: s.flags, supps: s.supps } };
   for (const [d, v] of Object.entries(s.days)) { const id = `days_${monthKey(d)}`; (out[id] = out[id] || {})[d] = v; }
   for (const [d, v] of Object.entries(s.gym)) { const id = `gym_${monthKey(d)}`; (out[id] = out[id] || {})[d] = v; }
   return out;
@@ -340,27 +357,10 @@ function syncSoon() {
   }, 1800);
 }
 
-// Demande ponctuelle : pas de salle le 25/11/2026. Appliquée une seule fois, après la synchro (pour ne pas être écrasée par la copie en ligne),
-// et seulement si la séance n'a pas été commencée. « Remettre la séance » reste possible ensuite.
-const SKIP_DAY = '2026-11-25';
-export function applyOneOffs() {
-  if (state.flags?.skipGym20261125) return;
-  update((s) => {
-    let next = setIn(s, ['flags', 'skipGym20261125'], true);
-    const g = s.gym[SKIP_DAY];
-    const started = g && Object.values(g.ex || {}).some((l) => l.some((x) => x.done));
-    if (!started && s.days[SKIP_DAY]?.skipGym === undefined) {
-      next = setIn(next, ['days', SKIP_DAY, 'skipGym'], true);
-      if (g) next = setIn(next, ['gym', SKIP_DAY], undefined);
-    }
-    return next;
-  });
-}
-
 export function startSync() {
   // la capacité peut répondre après le premier affichage : l'appli fonctionne déjà en local
   snapshotSeen();
-  (async () => { await initSync(); applyOneOffs(); })();
+  initSync();
 }
 
 // ───────────── Presse-papiers et fichiers ─────────────
