@@ -378,7 +378,7 @@ export async function copyText(text) {
 }
 
 export async function saveFile(filename, data) {
-  // Page hébergée hors de Claude (pas de window.claude) : téléchargement classique du navigateur
+  // Page hébergée seule (sans l'environnement qui fournit window.claude) : téléchargement classique du navigateur
   if (typeof window !== 'undefined' && !window.claude) {
     try {
       const type = filename.endsWith('.ics') ? 'text/calendar' : filename.endsWith('.json') ? 'application/json' : 'text/plain';

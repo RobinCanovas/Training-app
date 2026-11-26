@@ -632,13 +632,13 @@ with sync_playwright() as pw:
         shot(page8, '43_tomorrow.png')
     ctx8.close()
 
-    # ───────────── Parcours 9 : page hébergée hors de Claude (pas de window.claude) : téléchargement classique ─────────────
+    # ───────────── Parcours 9 : page hébergée seule (sans window.claude) : téléchargement classique ─────────────
     ctx9, page9 = make_context(browser, datetime.datetime(2026, 12, 2, 12, 0, 0))
     page9.add_init_script('delete window.claude;')
     page9.goto('https://app.test/')
     page9.wait_for_selector('.app-header')
 
-    @step('Hors Claude : l’export .ics passe par un téléchargement classique')
+    @step('Page hébergée : l’export .ics passe par un téléchargement classique')
     def _():
         ok('carte Rappels de repas sur Aujourd’hui', page9.get_by_text('Rappels de repas').first.is_visible())
         with page9.expect_download(timeout=5000) as d0:
