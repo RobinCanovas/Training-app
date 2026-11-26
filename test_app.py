@@ -585,6 +585,25 @@ with sync_playwright() as pw:
         page7.get_by_role('button', name='Jour précédent').click()
         ok('clic sur Jour précédent', page7.get_by_text('Mardi 1 décembre').first.is_visible())
         shot(page7, '40_iphone_notch.png')
+    @step('Carte Maintenant : cocher en un geste')
+    def _():
+        page7.get_by_role('button', name='Revenir à aujourd’hui').click()
+        ok('2 repas en retard annoncés', page7.get_by_text('2 repas pas cochés').is_visible())
+        page7.get_by_role('button', name='Marquer Petit-déjeuner comme fait').click()
+        ok('le petit-déjeuner est coché, il reste le déjeuner', page7.get_by_text('Déjeuner pas coché').is_visible())
+        page7.get_by_role('button', name='Marquer Déjeuner comme fait').click()
+        ok('plus de retard : le shake de 16 h 30 est proposé', page7.get_by_text('Shake Liquid Mass · 16:30').is_visible())
+        shot(page7, '42_now.png')
+    @step('Objectifs de la semaine et anneau de calories')
+    def _():
+        ok('anneau de calories', page7.get_by_role('img', name=re.compile('^Calories : ')).is_visible())
+        ok('carte objectifs', page7.get_by_text('Objectifs · semaine 1').is_visible())
+        for lbl in ['Séances de muscu', 'Sorties de course', 'Jours à 90 % des calories', 'Jours à 95 % des protéines', 'Pesées à jeun']:
+            ok(f'objectif « {lbl} »', page7.get_by_text(lbl).is_visible())
+        ok('prochain jalon', page7.get_by_text(re.compile('Prochain jalon')).is_visible())
+        ok('barre de progression du programme', page7.get_by_role('progressbar', name='Avancement du programme').count() == 1)
+        page7.get_by_text('Objectifs · semaine 1').scroll_into_view_if_needed()
+        shot(page7, '41_goals.png')
     ctx7.close()
     PAGE_OVERRIDE.clear()
 

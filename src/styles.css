@@ -32,7 +32,7 @@
 }
 
 @layer components {
-  .card { @apply rounded-2xl bg-surface border border-line; }
+  .card { @apply rounded-2xl bg-surface border border-line; background-image: linear-gradient(180deg, rgb(255 255 255 / .025), transparent 60px); }
   .card-pad { @apply p-4; }
   .lbl { @apply text-[11px] font-semibold uppercase tracking-[.08em] text-muted; }
   .inp { @apply w-full rounded-xl bg-raised border border-line px-3 min-h-[44px] text-[16px] text-text; }
@@ -68,3 +68,5 @@
 .check { width: 28px; height: 28px; border-radius: 8px; border: 2px solid rgb(var(--line)); background: rgb(var(--raised)); display: inline-flex; align-items: center; justify-content: center; flex: none; color: rgb(var(--accent-ink)); }
 .check[data-on='1'] { background: rgb(var(--accent)); border-color: rgb(var(--accent)); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; } }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon, Modal, Btn, Field, NumInput, Chip, ToastHost, toast, cx } from './ui.jsx';
 import { TimerBar } from './timer.jsx';
 import { A, useAppState, useSync, startSync, loadUI, saveUI, exportText, importText, resetAll, saveFile, copyText, isLocalOk } from './store.js';
-import { fmtShort, todayISO, weekIndex, clampWeek } from './lib/dates.js';
+import { fmtShort, todayISO, weekIndex, clampWeek, daysSinceStart } from './lib/dates.js';
 import { weekInfo, WEEKS } from './data/program.js';
 import Today from './tabs/Today.jsx';
 import Training from './tabs/Training.jsx';
@@ -187,6 +187,9 @@ export default function App() {
           </div>
           <button type="button" aria-label="Mes données : sauvegarde et synchronisation" onClick={() => setData(true)} className="w-11 h-11 rounded-xl bg-raised border border-line inline-flex items-center justify-center text-muted"><Icon name="Database" size={19} /></button>
           <button type="button" aria-label="Réglages" onClick={() => setSettings(true)} className="w-11 h-11 rounded-xl bg-raised border border-line inline-flex items-center justify-center text-muted"><Icon name="Settings" size={19} /></button>
+        </div>
+        <div className="mt-2 h-[3px] rounded-full bg-raised overflow-hidden" role="progressbar" aria-label="Avancement du programme" aria-valuenow={Math.round(Math.min(100, Math.max(0, (daysSinceStart(today) / (WEEKS * 7)) * 100)))} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, (daysSinceStart(today) / (WEEKS * 7)) * 100))}%` }} />
         </div>
       </header>
 

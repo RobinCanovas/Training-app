@@ -57,6 +57,24 @@ export function Meter({ value, max, done, tone = 'accent', height = 8 }) {
   );
 }
 
+/** Anneau de progression (SVG) : `children` s'affiche au centre. */
+export function Ring({ value, max, size = 116, stroke = 11, done, over, children, label }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+  const col = over ? 'rgb(var(--warn))' : done ? 'rgb(var(--good))' : 'rgb(var(--accent))';
+  return (
+    <div className="relative flex-none" style={{ width: size, height: size }} role="img" aria-label={label}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgb(var(--raised))" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={col} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: 'stroke-dashoffset .5s ease, stroke .3s' }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
+    </div>
+  );
+}
+
 export function Segmented({ options, value, onChange, className = '', compact = false }) {
   return (
     <div className={cx('grid gap-1 p-1 rounded-xl bg-raised border border-line', className)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }} role="tablist">

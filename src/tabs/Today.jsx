@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { Card, Btn, Chip, Icon, Meter, Modal, Field, NumInput, toast, useNow, useArm, cx, fmtK } from '../ui.jsx';
+import { Card, Btn, Chip, Icon, Meter, Ring, Modal, Field, NumInput, toast, useNow, useArm, cx, fmtK } from '../ui.jsx';
 import { A, useAppState } from '../store.js';
 import { MEALS, DAY_TYPES, QUICK, RESCUE, rampFactor } from '../data/nutrition.js';
 import { FOODS, fmtQty } from '../data/foods.js';
 import { weekInfo, SESSIONS, RUN_PLAN, START_DATE, WEEKS } from '../data/program.js';
 import { todayISO, weekIndex, clampWeek, daysToTarget, fmtShort, fmtLong, dow, toMin, fmtNum, diffDays, addDays } from '../lib/dates.js';
 import { measureStatus } from '../lib/body.js';
+import { weekGoals, streak, nextMilestone } from '../lib/goals.js';
 import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
 
 const whenLabel = (date) => (date === todayISO() ? 'aujourd’hui' : `le ${fmtShort(date)}`);
@@ -319,6 +320,29 @@ function Remaining({ label, unit, got, target, minimum, strong }) {
   );
 }
 
+function KcalRing({ got, target }) {
+  const left = Math.round(target - got);
+  const met = got >= target * 0.9;
+  const over = got > target + 150;
+  return (
+    <div className="flex items-center gap-4">
+      <Ring value={got} max={target} done={met && !over} over={over} label={`Calories : ${fmtK(got)} sur ${fmtK(target)}`}>
+        <span className="num text-[28px] font-bold leading-none">{fmtK(got)}</span>
+        <span className="text-[11.5px] text-muted mt-0.5">/ {fmtK(target)} kcal</span>
+      </Ring>
+      <div className="min-w-0 flex-1">
+        <div className="lbl">Calories</div>
+        <div className="num text-[15px] mt-1">
+          {over ? <span className="text-warn font-semibold">{fmtK(got - target)} kcal au-dessus</span>
+            : left <= 0 ? <span className="text-good font-semibold">Objectif atteint</span>
+              : <span>Reste {fmtK(left)} kcal</span>}
+        </div>
+        <div className="text-[12.5px] text-muted mt-1 leading-snug">{met && !over ? 'Zone visée atteinte (≥ 90 %).' : 'Vise au moins 90 % de la cible, c’est elle qui fait grossir.'}</div>
+      </div>
+    </div>
+  );
+}
+
 function RemainingCard({ state, date, onQuick }) {
   const T = targetsFor(state, date);
   const C = consumedFor(state, date);
@@ -326,7 +350,7 @@ function RemainingCard({ state, date, onQuick }) {
   return (
     <Card title="Restants du jour" icon="Target" right={<Btn size="sm" icon="Plus" onClick={onQuick}>Ajout</Btn>}>
       <div className="grid gap-3.5">
-        <Remaining label="Calories" unit="kcal" got={C.k} target={T.kcal} strong />
+        <KcalRing got={C.k} target={T.kcal} />
         <Remaining label="Protéines" unit="g" got={C.p} target={T.p} minimum />
         <Remaining label="Glucides" unit="g" got={C.c} target={T.c} minimum />
         <Remaining label="Lipides" unit="g" got={C.f} target={T.f} />
@@ -738,6 +762,39 @@ function RescueModal({ open, onClose, date }) {
 }
 
 // ───────────── Forme du jour ─────────────
+function GoalsCard({ state, date }) {
+  const today = todayISO();
+  const G = weekGoals(state, date, today);
+  const st = streak(state, today);
+  const mile = nextMilestone(today);
+  return (
+    <Card title={`Objectifs · semaine ${G.n}`} icon="Flag" right={st > 0 ? <span className="chip" style={{ color: 'rgb(var(--accent))' }}><Icon name="Flame" size={13} />{st} jour{st > 1 ? 's' : ''} d’affilée</span> : null}>
+      {!G.started && <p className="text-[13.5px] text-muted mb-3 leading-snug">Le compteur démarre lundi 30 novembre. Voici ce que tu viseras chaque semaine.</p>}
+      <div className="grid gap-3">
+        {G.items.map((it) => {
+          const full = it.done >= it.goal;
+          return (
+            <div key={it.id}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[14px] font-semibold">{it.label}</span>
+                <span className="text-[13px] num text-muted"><b className={cx('text-[15px]', full ? 'text-good' : 'text-text')}>{it.done}</b> / {it.goal}</span>
+              </div>
+              <div className="mt-1.5"><Meter value={it.done} max={it.goal} done={full} height={7} /></div>
+              {it.note && G.started && <div className="mt-0.5 text-[12px] text-muted">{it.note}</div>}
+            </div>
+          );
+        })}
+      </div>
+      {G.todo.length > 0 && G.started && (
+        <div className="mt-3 hair pt-2.5 text-[13px] text-muted leading-snug">
+          Encore au programme cette semaine : {G.todo.map((s) => (s.type === 'gym' ? `muscu (${s.id})` : `course ${s.id}`)).join(', ')}.
+        </div>
+      )}
+      {mile && <div className="mt-2 text-[13px] text-muted leading-snug"><Icon name="CalendarDays" size={13} className="inline -mt-0.5 mr-1" />Prochain jalon : <b className="text-text">{mile.label}</b>, {mile.when}.</div>}
+    </Card>
+  );
+}
+
 function CheckinCard({ state, date }) {
   const c = state.days[date]?.checkin || {};
   const set = (patch) => A.setCheckin(date, patch);
@@ -762,23 +819,69 @@ function CheckinCard({ state, date }) {
 }
 
 // ───────────── Bandeau d'alerte « repas en retard » ─────────────
-function LateBanner({ state, date }) {
+// Carte « Maintenant » : la prochaine chose à faire, cochable en un geste. Remplace l'ancienne alerte repas en retard.
+function NowCard({ state, date }) {
   const now = useNow(30000);
   if (date !== todayISO()) return null;
+  const d = state.days[date] || {};
   const type = dayTypeFor(state, date);
-  const times = Object.fromEntries(DAY_TYPES[type].meals.map((id) => [id, mealTime(state, date, id)]));
   const x = new Date(now);
   const minutes = x.getHours() * 60 + x.getMinutes();
-  const late = DAY_TYPES[type].meals.filter((id) => !state.days[date]?.meals?.[id] && minutes - toMin(times[id]) >= 30)
-    .sort((a, b) => toMin(times[a]) - toMin(times[b]));
-  if (!late.length) return null;
-  const first = late[0];
+  const sch = scheduleOn(state, date);
+  const tasks = DAY_TYPES[type].meals.map((id) => ({ kind: 'meal', id, at: toMin(mealTime(state, date, id)), done: !!d.meals?.[id], target: id === 'bkf' ? 'morning' : id === 'lunch' ? 'midday' : 'evening' }));
+  if (sch && (sch.type === 'gym' || sch.type === 'run')) {
+    const g = state.gym[date];
+    const done = sch.type === 'gym' ? !!(g && Object.values(g.ex || {}).some((l) => l.some((z) => z.done))) : !!state.runs[date];
+    tasks.push({ kind: 'session', id: sch.type, at: 17 * 60 + 30, done, sch, target: 'session' });
+  }
+  tasks.push({ kind: 'steps', id: 'steps', at: 21 * 60 + 30, done: d.pacerio?.steps > 0 || d.pacerio?.kcal > 0, target: 'steps' });
+  const todo = tasks.filter((t) => !t.done).sort((a, b) => a.at - b.at);
+  const goto = (k) => { const el = document.getElementById(`flow-${k}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  const hh = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const late = todo.filter((t) => t.kind === 'meal' && minutes - t.at >= 30);
+
+  if (!todo.length) {
+    return (
+      <div className="mb-3 rounded-2xl border border-good/50 bg-good/10 px-4 py-3 flex items-center gap-3" role="status">
+        <Icon name="CircleCheck" size={22} className="text-good flex-none" />
+        <div className="text-[14.5px] leading-snug"><b>Journée complète.</b> <span className="text-muted">Repas, séance et pas sont faits. Bois ton verre d’eau et dors tôt : c’est là que le muscle se construit.</span></div>
+      </div>
+    );
+  }
+  const t = late[0] || todo[0];
+  const isLate = late.length > 0;
+  const soon = t.at - minutes <= 60;
+  const tone = isLate ? 'border-warn/50 bg-warn/10' : soon ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface';
+  let title, sub, icon, action = null;
+  if (t.kind === 'meal') {
+    const M = MEALS[t.id];
+    const meal = mealAt(state, date, t.id);
+    icon = isLate ? 'BellRing' : M.icon;
+    title = isLate ? (late.length === 1 ? `${M.name} pas coché` : `${late.length} repas pas cochés`) : `${M.name} · ${hh(t.at)}`;
+    sub = isLate
+      ? `Prévu à ${hh(t.at)}. ${late.length > 1 ? 'Bois le shake maintenant, puis rattrape.' : 'Mange maintenant, même une version courte.'}`
+      : `${meal.title || M.title}${soon ? '' : ` · dans ${Math.max(0, Math.round((t.at - minutes) / 6) / 10)} h`}`;
+    action = <Btn size="sm" variant="primary" icon="Check" aria-label={`Marquer ${M.name} comme fait`} onClick={() => { A.toggleMeal(date, t.id); toast(`${M.name} coché`, 'good'); }}>Fait</Btn>;
+  } else if (t.kind === 'session') {
+    icon = t.sch.type === 'gym' ? 'Dumbbell' : 'Footprints';
+    title = t.sch.type === 'gym' ? 'Séance de muscu' : 'Sortie de course';
+    sub = `${t.sch.where || 'Aujourd’hui'} · mange ton repas d’avant-séance 1 h 30 avant.`;
+  } else {
+    icon = 'Footprints';
+    title = 'Pas du soir';
+    sub = 'Ouvre Pacerio, note tes pas et tes calories actives : la cible de demain en dépend.';
+  }
   return (
-    <div className="mb-3 rounded-2xl border border-warn/50 bg-warn/10 px-4 py-3 flex items-start gap-3" role="status">
-      <Icon name="BellRing" size={20} className="text-warn mt-0.5 flex-none" />
-      <div className="text-[14.5px] leading-snug">
-        <b>{late.length === 1 ? `${MEALS[first].name} pas coché` : `${late.length} repas pas cochés`}</b>
-        <span className="text-muted"> — prévu à {times[first]}. {late.length > 1 ? 'Bois le shake maintenant, puis rattrape.' : 'Mange maintenant, même une version courte.'}</span>
+    <div className={cx('mb-3 rounded-2xl border px-4 py-3 flex items-center gap-3', tone)} role="status">
+      <Icon name={icon} size={22} className={cx('flex-none', isLate ? 'text-warn' : 'text-accent')} />
+      <div className="min-w-0 flex-1">
+        <div className="lbl">{isLate ? 'En retard' : soon ? 'Maintenant' : 'Ensuite'}</div>
+        <div className="text-[15px] font-bold leading-snug"><b>{title}</b></div>
+        <div className="text-[13px] text-muted leading-snug">{sub}</div>
+      </div>
+      <div className="flex flex-col gap-1.5 flex-none">
+        {action}
+        <Btn size="sm" variant="ghost" onClick={() => goto(t.target)}>Voir</Btn>
       </div>
     </div>
   );
@@ -798,7 +901,7 @@ export default function Today({ go }) {
     <div>
       <NightBanner back={back} setBack={setBack} />
       <DayNav date={date} back={back} setBack={setBack} />
-      <LateBanner state={state} date={date} />
+      <NowCard state={state} date={date} />
       <WeightHero state={state} date={date} />
       <DayFlow state={state} date={date} />
       <RemainingCard state={state} date={date} onQuick={() => setQuick(true)} />
@@ -808,6 +911,7 @@ export default function Today({ go }) {
       <EveningCard state={state} date={date} onEdit={setEditId} onRescue={() => setRescue(true)} onQuick={() => setQuick(true)} />
       <div id="flow-steps" style={{ scrollMarginTop: 72 }}><PacerioCard state={state} date={date} /></div>
       {date === today && dow(date) === 0 && <SundayCard go={go} state={state} />}
+      <GoalsCard state={state} date={date} />
       <CheckinCard state={state} date={date} />
       <SuppManager state={state} open={supps} onClose={() => setSupps(false)} />
       <QuickAddModal open={quick} onClose={() => setQuick(false)} date={date} />
