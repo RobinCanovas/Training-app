@@ -377,6 +377,18 @@ export async function copyText(text) {
 }
 
 export async function saveFile(filename, data) {
+  // Page hébergée hors de Claude (pas de window.claude) : téléchargement classique du navigateur
+  if (typeof window !== 'undefined' && !window.claude) {
+    try {
+      const type = filename.endsWith('.ics') ? 'text/calendar' : filename.endsWith('.json') ? 'application/json' : 'text/plain';
+      const url = URL.createObjectURL(new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: `${type};charset=utf-8` }));
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+      return { ok: true, status: 'saved' };
+    } catch (e) { return { ok: false, code: 'unavailable' }; }
+  }
   try {
     const c = window.claude;
     const dl = c && c.use ? await c.use('downloads') : null;
