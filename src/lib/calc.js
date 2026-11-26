@@ -48,6 +48,18 @@ export function latestWeight(state) {
   return { date: d, kg: num(state.weights[d]) };
 }
 
+/** Tendance du poids : moyenne des pesées des 7 derniers jours jusqu'à `date`, et écart avec les 7 jours d'avant (le poids du matin varie de ±0,5 kg, la moyenne est plus fiable). */
+export function weightTrend(state, date) {
+  const avg = (from, to) => {
+    const v = [];
+    for (let i = from; i <= to; i++) { const k = num(state.weights[addDays(date, -i)]); if (Number.isFinite(k)) v.push(k); }
+    return v.length ? { m: sum(v) / v.length, n: v.length } : null;
+  };
+  const cur = avg(0, 6), prev = avg(7, 13);
+  if (!cur || cur.n < 3) return null;
+  return { avg: cur.m, n: cur.n, perWeek: prev && prev.n >= 3 ? cur.m - prev.m : null };
+}
+
 /** Moyennes hebdomadaires (semaine de programme) */
 export function weeklyAverages(state) {
   const acc = {};

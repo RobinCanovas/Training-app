@@ -426,6 +426,7 @@ with sync_playwright() as pw:
     @step('Historique : jauge, coach, courbes')
     def _():
         shot(page3, '20_today_seeded.png')
+        ok('tendance 7 jours affichée', page3.get_by_label('Tendance sur 7 jours').is_visible() and 'kg' in page3.get_by_label('Tendance sur 7 jours').inner_text())
         tab(page3, 'Stats')
         page3.wait_for_timeout(500)
         ok('3 graphiques', page3.locator('svg.recharts-surface').count() >= 3, str(page3.locator('svg.recharts-surface').count()))

@@ -7,7 +7,7 @@ import { weekInfo, SESSIONS, RUN_PLAN, START_DATE, WEEKS } from '../data/program
 import { todayISO, weekIndex, clampWeek, daysToTarget, fmtShort, fmtLong, dow, toMin, fmtNum, diffDays, addDays } from '../lib/dates.js';
 import { measureStatus } from '../lib/body.js';
 import { weekGoals, streak, nextMilestone } from '../lib/goals.js';
-import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
+import { latestWeight, targetOnDate, targetsFor, consumedFor, dayTypeFor, scheduleOn, num, parseHealthText, referenceActive, activeFor, weightTrend, mealMacros, mealAt, mealTime, suppOn, estimateMacros, scaleMacros, splitShares } from '../lib/calc.js';
 
 const whenLabel = (date) => (date === todayISO() ? 'aujourd’hui' : `le ${fmtShort(date)}`);
 
@@ -67,6 +67,7 @@ function WeightHero({ state, date }) {
   const left = daysToTarget(date);
   const delta = kg - S.startWeight;
   const todayKg = state.weights[date];
+  const trend = weightTrend(state, date);
   const [draft, setDraft] = useState(todayKg ?? '');
   useEffect(() => { setDraft(todayKg ?? ''); }, [todayKg, date]);
   const save = () => {
@@ -107,6 +108,7 @@ function WeightHero({ state, date }) {
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-muted">{week < 1 ? 'Départ le lundi 30 novembre' : `Semaine ${clampWeek(week)}/${WEEKS}`}</div>
           <div className="text-[15px] font-semibold truncate">{wInfo.name}</div>
+          {trend && <div className="text-[12px] text-muted num mt-0.5" aria-label="Tendance sur 7 jours">Tendance 7 j : <b className="text-text">{fmtNum(trend.avg)} kg</b>{trend.perWeek != null && <span className={trend.perWeek < 0 ? 'text-warn' : trend.perWeek > 0.5 ? 'text-warn' : 'text-good'}> ({trend.perWeek >= 0 ? '+' : '−'}{fmtNum(Math.abs(trend.perWeek), 2)}/sem.)</span>}</div>}
         </div>
         <div className="w-[104px]"><NumInput value={draft} onChange={setDraft} placeholder={fmtNum(kg)} suffix="kg" ariaLabel="Poids du jour à jeun" /></div>
         <Btn variant="primary" onClick={save} aria-label="Enregistrer la pesée">{todayKg != null ? 'Modifier' : 'Peser'}</Btn>
